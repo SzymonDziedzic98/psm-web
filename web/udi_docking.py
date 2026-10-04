@@ -32,7 +32,7 @@ import udi_experiments as ue
 import udi_parks as up
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-GAML = os.path.join(HERE, "..", "models", "Hall_AC_aversion.gaml")
+GAML = os.path.join(HERE, "..", "models", "PSM.gaml")
 PARKS = "/mnt/project-files/doktorat/parki_osm"
 BOTS = 50
 CYCLES = 10000

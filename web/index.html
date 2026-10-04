@@ -162,7 +162,7 @@ code { font-family: var(--font-mono); font-size: 12.5px; }
 
 <header class="top">
   <h1>PSM – stres proksemiczny i awersja do tras</h1>
-  <p>Port modelu <code>Hall_AC_aversion.gaml</code> do Pythona, uruchamiany w przeglądarce. Parametry z oznaczeniem ↻ działają po ponownej inicjalizacji.</p>
+  <p>Port modelu <code>PSM.gaml</code> do Pythona, uruchamiany w przeglądarce. Parametry z oznaczeniem ↻ działają po ponownej inicjalizacji.</p>
   <div class="status" id="status"><span>cykl</span> <b id="stCycle">–</b> · <span>park</span> <b id="stNet">–</b></div>
   <button type="button" class="btn small" id="btnTour">Samouczek</button>
   <a class="btn small" href="modele.html" id="lnkModels">Modele doktoratu</a>
@@ -471,7 +471,7 @@ code { font-family: var(--font-mono); font-size: 12.5px; }
     <p class="hint">Każdy przycisk ustawia parametry na parku generowanym, inicjalizuje model z seedem 1 i uruchamia go do 10 000 cykli. Po pierwszym wariancie uruchom drugi: pierwszy zostanie zapamiętany i oba pojawią się na wykresie porównania w zakładce Symulacja.</p>
     <div class="try-list" id="tryList" data-noi18n></div>
     <h3>Co odwzorowuje ten port</h3>
-    <p>Plik <code>psm.py</code> zawiera model z <code>models/Hall_AC_aversion.gaml</code>: sieć ścieżek jako graf ważony długością × (1 + aversion_strength × fear_memory), boty i phantomy idące najkrótszą ważoną trasą do losowego punktu, strefy Halla (1,8 / 4,8 / 14,4 / 40 m przy mnożniku 4) zasłaniane przez przeszkody, czujność, adrenalinę i kortyzol phantoma, próg lęku 11,5, znaczniki strachu, odkładanie i zanikanie pamięci strachu na odcinkach oraz zapis <code>summary.csv</code>.</p>
+    <p>Plik <code>psm.py</code> zawiera model z <code>models/PSM.gaml</code>: sieć ścieżek jako graf ważony długością × (1 + aversion_strength × fear_memory), boty i phantomy idące najkrótszą ważoną trasą do losowego punktu, strefy Halla (1,8 / 4,8 / 14,4 / 40 m przy mnożniku 4) zasłaniane przez przeszkody, czujność, adrenalinę i kortyzol phantoma, próg lęku 11,5, znaczniki strachu, odkładanie i zanikanie pamięci strachu na odcinkach oraz zapis <code>summary.csv</code>.</p>
     <h3>Różnice względem GAMA</h3>
     <ul class="plain">
       <li>Inny generator liczb losowych: wyniki zgadzają się statystycznie, nie liczba w liczbę. Ten sam seed daje w tej wersji te same wyniki.</li>
@@ -1601,7 +1601,7 @@ $("repStop").after(UX.linkButton(() => UX.tryLink(TRY.indexOf(repLast.it), "reps
 UX.disabledHint("repStop", "Działa w trakcie liczenia powtórzeń.", "Active while replicates run.");
 
 // ---------- GAMA: pakiet do GAMA i połączenie z serwerem GAMA ----------
-// Model GAML z ustawieniami strony buduje web/gama_export.py (kopia models/Hall_AC_aversion.gaml z podmienionymi stałymi,
+// Model GAML z ustawieniami strony buduje web/gama_export.py (kopia models/PSM.gaml z podmienionymi stałymi,
 // park w SHP). Wyniki GAMA (z pliku albo z serwera) strona zestawia z Pythonem: te same ustawienia, park i seedy.
 const G_METRICS = [
   { key: "total_adrenaline", pl: "Σ adrenaliny", en: "Σ adrenaline" },
@@ -1613,10 +1613,10 @@ async function gamaSource() {
   if (GM.src) return GM.src;
   let src = null;
   // GitHub Pages: model obok strony; lokalnie (serwer w katalogu repozytorium): ../models/
-  for (const url of ["Hall_AC_aversion.gaml", "../models/Hall_AC_aversion.gaml"]) {
+  for (const url of ["PSM.gaml", "../models/PSM.gaml"]) {
     try { const r = await fetch(url, { cache: "no-cache" }); if (r.ok) { src = await r.text(); break; } } catch (e) { /* następny adres */ }
   }
-  if (!src) throw new Error(L("nie znaleziono pliku Hall_AC_aversion.gaml obok strony", "Hall_AC_aversion.gaml was not found next to the page"));
+  if (!src) throw new Error(L("nie znaleziono pliku PSM.gaml obok strony", "PSM.gaml was not found next to the page"));
   const r = await fetch("gama_export.py", { cache: "no-cache" });
   if (!r.ok) throw new Error("gama_export.py: HTTP " + r.status);
   py.FS.writeFile("/home/pyodide/gama_export.py", await r.text());
@@ -1663,7 +1663,7 @@ async function gamaBuild(zip) {
   const pk = await gamaPark();
   const seeds = gamaSeeds();
   if (!seeds.length) throw new Error(L("podaj seedy, np. 1, 2, 3 albo 1-10", "enter seeds, e.g. 1, 2, 3 or 1-10"));
-  const meta = { model: "PSM", model_file: "Hall_AC_aversion.gaml", python_model_version: MODEL_HASH, park: parkLabel(),
+  const meta = { model: "PSM", model_file: "PSM.gaml", python_model_version: MODEL_HASH, park: parkLabel(),
     app: location.origin + location.pathname, saved: new Date().toISOString() };
   const res = JSON.parse(py.globals.get("_gama_build")(JSON.stringify(readParams()), pk.kind !== "generated", JSON.stringify(seeds),
     JSON.stringify(meta), src, zip));
