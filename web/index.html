@@ -62,6 +62,7 @@ header.top {
   padding-block: 16px 12px; border-bottom: 1px solid var(--line);
 }
 header.top p { margin: 0; color: var(--muted); max-width: 72ch; }
+.top a.btn { text-decoration: none; color: inherit; }
 .status { margin-left: auto; font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
 .status b { color: var(--ink); font-weight: 500; }
 .lang { display: flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
@@ -160,6 +161,8 @@ code { font-family: var(--font-mono); font-size: 12.5px; }
   <h1>PSM – stres proksemiczny i awersja do tras</h1>
   <p>Port modelu <code>Hall_AC_aversion.gaml</code> do Pythona, uruchamiany w przeglądarce. Parametry z oznaczeniem ↻ działają po ponownej inicjalizacji.</p>
   <div class="status" id="status"><span>cykl</span> <b id="stCycle">–</b> · <span>park</span> <b id="stNet">–</b></div>
+  <button type="button" class="btn small" id="btnTour">Samouczek</button>
+  <a class="btn small" href="modele.html" id="lnkModels">Modele doktoratu</a>
   <div class="lang" role="group" aria-label="Język / Language">
     <button type="button" data-lang="pl" lang="pl">PL</button><button type="button" data-lang="en" lang="en">EN</button>
   </div>
@@ -204,6 +207,7 @@ code { font-family: var(--font-mono); font-size: 12.5px; }
             <option>Park Zachodni</option>
             <option value="__custom">inna nazwa…</option>
           </select></div>
+        <div id="parkGallery"></div>
         <div class="field wide" id="osmCustomRow" hidden><label for="osmCustom">Nazwa w OSM</label>
           <input type="text" id="osmCustom" placeholder="np. Park Tołpy"></div>
         <div class="controls"><button class="btn" id="btnLib">Wczytaj gotowy</button>
@@ -249,6 +253,7 @@ code { font-family: var(--font-mono); font-size: 12.5px; }
           <span style="--c: var(--bush)">przeszkody</span>
           <span style="--c: #d03020">znacznik strachu</span>
         </div>
+        <div id="mapScale" hidden data-noi18n></div>
         <p class="hint" id="layerInfo"></p>
       </figure>
       <figure class="display">
@@ -260,6 +265,12 @@ code { font-family: var(--font-mono); font-size: 12.5px; }
           <span style="--c: var(--ink)">czujność</span>
         </div>
       </figure>
+    </div>
+    <div class="panel" id="repPanel" hidden data-noi18n>
+      <h2 id="repTitle"></h2>
+      <p class="hint mono" id="repProg"></p>
+      <div class="controls"><button class="btn" id="repStop">Zatrzymaj</button></div>
+      <div class="table-wrap" id="repTable"></div>
     </div>
     <div class="panel" id="cmpPanel" data-noi18n></div>
     <div class="panel">
@@ -321,6 +332,11 @@ code { font-family: var(--font-mono); font-size: 12.5px; }
     <progress id="bProg" value="0" max="1"></progress>
     <p class="hint mono" id="bProgTxt" data-noi18n>—</p>
     <div class="table-wrap" id="bSummary"></div>
+    <div class="box-plot" id="bBox" hidden>
+      <h2>Rozkład wyniku w wariantach</h2>
+      <div class="controls"><select id="bBoxMetric" aria-label="Wynik na wykresie" data-nosort></select></div>
+      <canvas id="bBoxCanvas"></canvas>
+    </div>
     <div class="table-wrap" id="bTable"></div>
     <div class="controls"><button class="btn" id="bDl" disabled>results.csv</button><button class="btn" id="bDlSum" disabled>summary.csv</button><button class="btn" id="bDlCfg" disabled>config.json</button></div>
   </div>
@@ -402,7 +418,7 @@ code { font-family: var(--font-mono); font-size: 12.5px; }
 
 <script>
 "use strict";
-let py = null, DEFAULTS = {}, TYPES = {}, GUI = [], RESTART = new Set(), CHOICES = {}, SENS = [];
+let py = null, DEFAULTS = {}, TYPES = {}, GUI = [], RESTART = new Set(), CHOICES = {}, SENS = [], OUTPUTS = [];
 let isoVals = null;
 let running = false, hasModel = false, net = null, snap = null;
 let chart = null, histLen = 0;
@@ -547,6 +563,7 @@ def _osm_geojson(path):
   RESTART = new Set(JSON.parse(py.runPython("json.dumps(sorted(psm.RESTART_KEYS))")));
   CHOICES = JSON.parse(py.runPython("json.dumps(psm.CHOICES)"));
   SENS = JSON.parse(py.runPython("json.dumps(list(psm.SENS_PARAMS))"));
+  OUTPUTS = JSON.parse(py.runPython("json.dumps(list(psm.OUTPUTS))"));
   GAP = py.runPython("psm.OSM_BRIDGE_GAP");
   renderOsmInfo();
   const numKeys = Object.keys(DEFAULTS).filter((k) => ["int", "float", "NoneType"].includes(TYPES[k]));
@@ -565,6 +582,7 @@ def _osm_geojson(path):
   UX.refresh();
   $("loading").hidden = true;
   await initModel();
+  startTour(false);
 }
 
 // ---------- formularz parametrów ----------
@@ -927,6 +945,12 @@ function draw() {
     ctx.stroke();
   });
   ctx.globalAlpha = 1;
+  UX.scaleBar($("mapScale"), layer === "fear"
+    ? { title: ["Kolor ścieżki: pamięć strachu na odcinku", "Path colour: fear memory on the segment"], stops: [pathCol, "rgb(120,48,38)", "rgb(255,0,0)"], min: 0, max: 5.5, plus: true }
+    : layer === "stress" ? { title: ["Kolor ścieżki: średnia adrenalina phantoma na odcinku", "Path colour: the phantom's mean adrenaline on the segment"],
+        stops: ["hsl(40,20%,55%)", "hsl(20,55%,48%)", "hsl(0,90%,40%)"], min: vmin, max: vmax }
+    : vals ? { title: ["Kolor ścieżki: pole izowisty (m²)", "Path colour: isovist area (m²)"], stops: ["hsl(210,70%,25%)", "hsl(210,30%,75%)"], min: vmin, max: vmax }
+    : null);
   for (const [x, y, a] of snap.fears) {
     ctx.beginPath(); ctx.arc(view.X(x), view.Y(y), 10 * s, 0, 2 * Math.PI);
     ctx.fillStyle = `rgba(208,48,32,${(a / 255 * 0.55).toFixed(3)})`; ctx.fill();
@@ -1085,6 +1109,31 @@ function renderBatch(mode, rows, keys, base) {
     : mode === "lhs" ? L("Korelacja rang Spearmana parametr–wynik", "Spearman rank correlation parameter–output")
     : L("Średnie i SD w wariantach", "Means and SD per variant");
   $("bSummary").replaceChildren(cap, dictTable(summ));
+  boxState = (mode === "planting" || mode === "sweep") ? { rows, keys } : null;
+  renderBox();
+}
+
+// O: wykres pudełkowy wyniku w wariantach (eksperyment nasadzeń i przegląd parametrów)
+let boxState = null;
+function renderBox() {
+  const box = $("bBox");
+  if (!boxState || !boxState.rows.length) { box.hidden = true; return; }
+  box.hidden = false;
+  const sel = $("bBoxMetric");
+  if (!sel.options.length) {
+    OUTPUTS.forEach((k) => sel.add(new Option(k, k)));
+    sel.value = "total_adrenaline";
+  }
+  const groups = new Map();
+  // w etykiecie tylko parametry, które się zmieniają
+  const vary = boxState.keys.filter((k) => new Set(boxState.rows.map((r) => r[k])).size > 1);
+  boxState.rows.forEach((r) => {
+    const g = vary.map((k) => k + "=" + r[k]).join(", ") || r.label || "–";
+    if (!groups.has(g)) groups.set(g, []);
+    const v = r[sel.value];
+    if (typeof v === "number") groups.get(g).push(v);
+  });
+  UX.boxPlot($("bBoxCanvas"), [...groups].map(([label, values]) => ({ label, values })), sel.value);
 }
 
 // ---------- testy ----------
@@ -1128,7 +1177,7 @@ $("btnRun").onclick = () => {
 };
 $("btnStep").onclick = () => { if (hasModel) refresh(JSON.parse(py.globals.get("_advance")(1))); };
 $("srcKind").onchange = sourceChanged;
-$("osmPark").onchange = () => { $("osmCustomRow").hidden = $("osmPark").value !== "__custom"; libraryChanged(); };
+$("osmPark").onchange = () => { $("osmCustomRow").hidden = $("osmPark").value !== "__custom"; libraryChanged(); if (PARK_GAL) PARK_GAL.mark($("osmPark").value); };
 $("btnOsm").onclick = fetchOsm;
 $("btnLib").onclick = loadLibraryPark;
 $("btnOsmSave").onclick = () => {
@@ -1206,7 +1255,7 @@ function renderOsmInfo() {
 I18N.onChange(() => {
   document.querySelectorAll("#paramForm summary").forEach((el) => { el.textContent = L(el.dataset.pl, I18N_CAT_EN[el.dataset.pl] || el.dataset.pl); });
   document.querySelectorAll("#paramForm label[data-key]").forEach((el) => { el.textContent = L(el.dataset.pl, I18N_PARAM_EN[el.dataset.key] || el.dataset.pl); });
-  runLabel(); renderSpec(); renderNet(); renderStats(); renderLayerInfo(); renderOsmInfo(); sourceChanged(); renderSetInfo(); renderVersion();
+  runLabel(); renderSpec(); renderNet(); renderStats(); renderLayerInfo(); renderOsmInfo(); sourceChanged(); renderSetInfo(); renderVersion(); renderRep(); renderBox();
   sortSelects();
   if (chart) {
     chart.data.datasets[0].label = L("adrenalina", "adrenaline");
@@ -1338,12 +1387,92 @@ async function runTry(it, i) {
   if (SET) SET.save();
   tryLabel = it.variants[i].label;
   setMsg = null; renderSetInfo();
+  MOB.show("results");
   UX.tryBanner($("tryBanner"), it, i, runTry);
   window.scrollTo({ top: 0, behavior: "smooth" });
   await initModel();
   if (hasModel) { running = true; runLabel(); loop(); }
 }
-UX.tryCards($("tryList"), TRY, runTry);
+UX.tryCards($("tryList"), TRY, runTry, runReps);
+
+// ---------- K: oba warianty × 5 seedów, bez animacji ----------
+const REP_METRICS = [
+  { key: "total_adrenaline", pl: "Σ adrenaliny phantoma 0", en: "Σ adrenaline of phantom 0" },
+  { key: "total_cortisol", pl: "Σ kortyzolu", en: "Σ cortisol" },
+  { key: "fear_events", pl: "epizody lęku", en: "fear episodes" },
+  { key: "feared_edges", pl: "odcinki ze strachem", en: "segments with fear" },
+];
+let repStop = false, repLast = null;
+function renderRep() {
+  if (!repLast) return;
+  $("repTitle").textContent = L("Powtórzenia: ", "Replicates: ") + L(repLast.it.title[0], repLast.it.title[1]);
+  UX.repTable($("repTable"), repLast.it.variants.map((v) => v.label), REP_METRICS, repLast.res, repLast.seeds);
+}
+async function runReps(it) {
+  if (!py) return;
+  document.querySelector('nav.tabs button[data-tab="sim"]').click();
+  running = false; runLabel();
+  MOB.show("results");
+  UX.tryBanner($("tryBanner"), null);
+  const seeds = [1, 2, 3, 4, 5], res = it.variants.map(() => []);
+  repLast = { it, seeds, res };
+  repStop = false;
+  $("repPanel").hidden = false; $("repStop").disabled = false; $("repTable").replaceChildren();
+  renderRep();
+  $("repPanel").scrollIntoView({ behavior: "smooth", block: "start" });
+  const t0 = performance.now();
+  try {
+    for (let vi = 0; vi < it.variants.length && !repStop; vi++) {
+      for (const seed of seeds) {
+        if (repStop) break;
+        const params = Object.assign({}, DEFAULTS, it.base, it.variants[vi].params, { park: "generated" });
+        py.globals.get("_init")(JSON.stringify(params), String(seed), false);
+        let done = false;
+        while (!done && !repStop) {
+          done = py.runPython("_M.run(1000); _M.cycle >= _M.p['end_cycle']");
+          $("repProg").textContent = `${L("wariant", "variant")} ${vi + 1}/${it.variants.length} · seed ${seed} · ${L("cykl", "cycle")} ${py.runPython("_M.cycle")} · ${((performance.now() - t0) / 1000).toFixed(0)} s`;
+          await tick();
+        }
+        if (repStop) break;
+        res[vi].push(JSON.parse(py.runPython("json.dumps(_M.metrics())")));
+        renderRep();
+      }
+    }
+  } catch (e) { $("repProg").textContent = L("Błąd: ", "Error: ") + (e.message || String(e)).split("\n").slice(-2).join(" "); }
+  if (!/Błąd|Error/.test($("repProg").textContent))
+    $("repProg").textContent = (repStop ? L("Zatrzymano", "Stopped") : L("Gotowe", "Done")) + ` · ${((performance.now() - t0) / 1000).toFixed(0)} s`;
+  $("repStop").disabled = true;
+  hasModel = false;
+  await initModel();
+}
+$("repStop").onclick = () => { repStop = true; };
+UX.disabledHint("repStop", "Działa w trakcie liczenia powtórzeń.", "Active while replicates run.");
+
+// ---------- I, L, H, N: PNG, widok na telefon, samouczek, galeria parków ----------
+UX.pngButtons([...document.querySelectorAll('section[data-panel="sim"] figure.display'), $("cmpPanel"), $("bBox")]);
+const MOB = UX.mobileTabs(document.querySelector('section[data-panel="sim"]'));
+$("bBoxMetric").onchange = renderBox;
+function startTour(force) {
+  document.querySelector('nav.tabs button[data-tab="sim"]').click();
+  MOB.show("params");
+  UX.tour("psm-web:samouczek", [
+    { el: () => document.querySelector(".source"), text: ["Tu wybierasz park: generowany, gotowy z biblioteki (OpenStreetMap, Wrocław) albo własne pliki.", "Choose the park here: generated, a ready one from the library (OpenStreetMap, Wrocław) or your own files."] },
+    { el: () => document.querySelector(".cat.basic"), text: ["Najważniejsze parametry. Najedź na nazwę albo kliknij „?”, żeby zobaczyć opis. Resztę pokazuje przycisk pod spodem.", "The key parameters. Hover over a name or click “?” to see its description. The button below shows the rest."] },
+    { el: () => $("btnInit"), text: ["Inicjalizuj buduje park i agentów. Potem Start (spacja) albo Krok (→).", "Initialise builds the park and the agents. Then Run (space) or Step (→)."] },
+    { el: () => { MOB.show("results"); return $("map"); }, text: ["Mapa: ścieżki, krzewy, boty i phantom ze strefami. Kolor ścieżek objaśnia skala pod mapą.", "The map: paths, shrubs, bots and the phantom with its zones. The scale below the map explains the path colours."] },
+    { el: () => $("cmpPanel"), text: ["Porównanie: zapamiętaj przebieg, zmień ustawienia i uruchom ponownie, żeby zobaczyć oba na jednym wykresie.", "Comparison: keep a run, change the settings and run again to see both on one chart."] },
+    { el: () => document.querySelector('nav.tabs button[data-tab="about"]'), text: ["W zakładce O modelu jest opis i gotowe eksperymenty „Co wypróbować”, uruchamiane jednym kliknięciem.", "The About tab has the description and ready experiments under “Things to try”, run with one click."] },
+  ], force);
+}
+$("btnTour").onclick = () => startTour(true);
+let PARK_GAL = null;
+parkLibrary().then((lib) => {
+  PARK_GAL = UX.gallery($("parkGallery"), lib, "parki/mini/", (name) => {
+    $("osmPark").value = name; $("osmCustomRow").hidden = true; libraryChanged();
+    PARK_GAL.mark(name);
+    loadLibraryPark();
+  });
+}).catch(() => { $("parkGallery").hidden = true; });
 
 // ---------- jak cytować i wersja modelu ----------
 const CITE = "Dziedzic, S., Szurlej, M., & Kamiński, M. (2026). PSM: Proxemic Stress Model with route aversion " +
