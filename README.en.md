@@ -6,7 +6,7 @@ PSM is an agent-based model of how a lone park visitor reacts to other people ne
 
 The repository holds three versions of the same model:
 
-- `models/Hall_AC_aversion.gaml` is the reference GAMA implementation (authors: Mikołaj Szurlej, Maciej Kamiński).
+- `models/PSM.gaml` is the reference GAMA implementation (authors: Mikołaj Szurlej, Maciej Kamiński). Until 4 Oct 2026 the file was named `Hall_AC_aversion.gaml`; earlier materials use that name.
 - `src/psm.py` is a port to plain Python that uses only the standard library. It runs single simulations, parameter sweeps, planting experiments and sensitivity analyses, and it has its own test suite.
 - `web/index.html` runs `src/psm.py` in the browser through Pyodide. Nothing has to be installed.
 

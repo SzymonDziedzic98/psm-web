@@ -5,7 +5,7 @@ name: Strona PSM (GitHub Pages)
 on:
   push:
     branches: [main]
-    paths: ["web/**", "src/**", "models/Hall_AC_aversion.gaml", ".github/workflows/pages.yml"]
+    paths: ["web/**", "src/**", "models/PSM.gaml", ".github/workflows/pages.yml"]
   workflow_dispatch:
 
 permissions:
@@ -32,7 +32,7 @@ jobs:
           mkdir _site
           cp -r web/. _site/
           cp src/psm.py _site/psm.py
-          cp models/Hall_AC_aversion.gaml _site/Hall_AC_aversion.gaml
+          cp models/PSM.gaml _site/PSM.gaml
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5
         with:

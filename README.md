@@ -7,7 +7,7 @@ Model agentowy w GAMA (Proxemic Stress Model) z modyfikacją: sprzężenie zwrot
 
 ## Model
 
-`models/Hall_AC_aversion.gaml` (autorzy: Mikołaj Szurlej, Maciej Kamiński)
+`models/PSM.gaml` (autorzy: Mikołaj Szurlej, Maciej Kamiński; do 4.10.2026 plik nazywał się `Hall_AC_aversion.gaml`, tej nazwy używają wcześniejsze materiały, m.in. artykuł UDI)
 
 - **Strefy proksemiczne Halla** (intymna, osobista, społeczna, publiczna), skalowane parametrem `hall_multiplier`.
 - **Adrenalina i kortyzol**: fantom (agent badany) reaguje na obecność botów w swoich strefach; model śledzi też czujność (vigilance).
@@ -19,7 +19,7 @@ Symulacja zatrzymuje się po 10 000 cyklach; w cyklu 9999 wyniki są dopisywane 
 
 ## Wersja w Pythonie (`src/`) i w przeglądarce (`web/`)
 
-- `src/psm.py` – port `models/Hall_AC_aversion.gaml` do czystego Pythona (tylko biblioteka standardowa):
+- `src/psm.py` – port `models/PSM.gaml` do czystego Pythona (tylko biblioteka standardowa):
   model, przegląd `aversion_strength` (batch), testy, czytnik `.shp`/GeoJSON i import parku z OpenStreetMap.
   - `python src/psm.py --test`
   - `python src/psm.py --run --roads Staszica_SHP_sciezki_01.shp --obstacles Staszica_SHP_krzaki_09.shp`
