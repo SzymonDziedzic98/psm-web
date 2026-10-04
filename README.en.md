@@ -36,6 +36,12 @@ python src/psm.py --fetch-osm "Park Staszica" --out park_staszica.geojson
 
 Without `--roads` the model uses a generated park (a random grid of alleys with shrubs), set by `park_seed`. `--set key=value` changes any parameter, and `--sweep key=v1,v2` runs every listed value. `python src/psm.py --help` lists all options; the help text is in Polish.
 
+On the page, Initialize, Start and Step sit in a bar above the Parameters/Results tabs; on a phone the bar and the cycle counter stay at the top of the screen while scrolling.
+
+## Running in GAMA
+
+The model runs in GAMA 2025.6 (checked: same results as GAMA 1.9.3). The "GAMA" tab of the page downloads a ZIP package with a copy of `PSM.gaml` set to the park and parameters of the Simulation tab (paths and shrubs as shapefiles), headless run scripts and a description; `web/gama_export.py` builds it and `models/PSM.gaml` itself is not changed. The same tab can connect to a GAMA server on your computer (`gama-headless.sh -socket 6868` in the GAMA `headless` folder, on Windows `gama-headless.bat -socket 6868`) and show GAMA results next to Python results for the same settings and seeds.
+
 ## Loading your own layout
 
 A design variant drawn in QGIS or CAD can be loaded as GeoJSON or as ESRI Shapefile (`.shp` with its `.shx`, `.dbf`, `.prj`).

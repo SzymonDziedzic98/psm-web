@@ -1,9 +1,11 @@
-# PD
-Proxemics Stress
+# PSM: Proxemic Stress Model z awersją do tras
 
 [English description: README.en.md](README.en.md)
 
 Model agentowy w GAMA (Proxemic Stress Model) z modyfikacją: sprzężenie zwrotne między stresem a wyborem trasy.
+Repozytorium zawiera model GAML (`models/`), jego port do Pythona (`src/`) i aplikację w przeglądarce (`web/`).
+
+Strona: https://szymondziedzic98.github.io/psm-web/ (bez instalacji; przełącznik PL/EN w nagłówku).
 
 ## Model
 
@@ -16,6 +18,15 @@ Model agentowy w GAMA (Proxemic Stress Model) z modyfikacją: sprzężenie zwrot
   - `fear_deposit`, `fear_decay`, `reweight_every` sterują odkładaniem, zanikaniem i przeliczaniem wag.
 
 Symulacja zatrzymuje się po 10 000 cyklach; w cyklu 9999 wyniki są dopisywane do `results/summary.csv`.
+
+### Uruchomienie w GAMA
+
+Model działa w GAMA 2025.6 (sprawdzone: wyniki takie same jak w GAMA 1.9.3). Zakładka „GAMA” na stronie:
+
+- pobiera pakiet ZIP z kopią `PSM.gaml` z ustawieniami i parkiem z zakładki Symulacja (sieć i krzewy w SHP),
+  skryptami uruchomienia headless i opisem; pakiet buduje `web/gama_export.py` (sam plik `models/PSM.gaml` się nie zmienia);
+- łączy się z serwerem GAMA na komputerze użytkownika (`gama-headless.sh -socket 6868` w katalogu `headless` GAMA,
+  Windows: `gama-headless.bat -socket 6868`) i pokazuje wyniki GAMA obok wyników Pythona dla tych samych ustawień i seedów.
 
 ## Wersja w Pythonie (`src/`) i w przeglądarce (`web/`)
 
@@ -43,6 +54,8 @@ Symulacja zatrzymuje się po 10 000 cyklach; w cyklu 9999 wyniki są dopisywane 
   Powtórzenia, batch i „Wszystkie parki z biblioteki” liczą się w tle (`web/bg.js`, osobny Pyodide w Web Workerze), więc strona
   nie przestaje reagować; `web/sw.js` zapisuje stronę i Pyodide w przeglądarce, więc kolejne otwarcie jest szybsze i działa bez internetu.
   `?try=2.1` otwiera stronę od razu na wariancie 1 drugiego eksperymentu z „Co wypróbować”, `?try=2.reps` liczy oba warianty × 5 seedów.
+  Przyciski Inicjalizuj, Start i Krok są w pasku nad kartami Parametry/Wyniki; na telefonie pasek z licznikiem
+  cykli zostaje u góry ekranu przy przewijaniu.
   Workflow `.github/workflows/pages.yml` publikuje `web/` razem z `src/psm.py` na GitHub Pages
   (jednorazowo: Settings → Pages → Source: „GitHub Actions”).
 
@@ -82,6 +95,10 @@ python src/psm.py --run --isovist --edges edges.csv --set planting=controlled
 python src/psm.py --batch --sweep bot_graph=weighted,plain --sweep aversion_strength=0,5 --repeat 10
 ```
 
+Przykład do artykułu SoftwareX: `python examples/example_two_variants.py` porównuje 1500 m² kęp krzewów
+w narożnikach skrzyżowań z tymi samymi kępami 20 m dalej (park generowany, 50 botów, po 10 przebiegów) i zapisuje
+dane oraz rycinę 3 do `examples/output/`.
+
 Eksperymenty E1–E3 do artykułu (UDI) są zdefiniowane w `web/udi_experiments.py`, a wykresy tworzy
 `web/udi_figures.py` (wymaga matplotlib):
 
@@ -115,7 +132,8 @@ Model wczytuje dwa shapefile, podane ścieżką względną do pliku `.gaml`, wi�
 - `Staszica_SHP_sciezki_01.shp` (sieć ścieżek)
 - `Staszica_SHP_krzaki_09.shp` (przeszkody / krzaki)
 
-Każdy shapefile to komplet plików (`.shp`, `.shx`, `.dbf`, `.prj`, ...). **Nie są jeszcze w repozytorium.**
+Każdy shapefile to komplet plików (`.shp`, `.shx`, `.dbf`, `.prj`, ...). **Nie są w repozytorium.** Gotowy zestaw
+model + sieć + krzewy dla dowolnego parku z aplikacji daje pakiet z zakładki „GAMA” (wyżej).
 
 ## Licencja i cytowanie
 
