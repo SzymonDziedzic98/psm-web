@@ -223,7 +223,18 @@ const I18N_EN = {
  "__title": "PSM in the browser",
  "cykl": "cycle",
  "park": "park",
- "Park": "Park"
+ "Park": "Park",
+ "Ustawienia": "Settings",
+ "Mapa ciepła: dwa zmieniane parametry": "Heat map: two varied parameters",
+ "Średnia wybranego wyniku w każdej kombinacji; kolor od najniższej (fioletowy) do najwyższej (żółty) wartości.": "Mean of the chosen output in each combination; colour from the lowest (purple) to the highest (yellow) value.",
+ "Wszystkie parki z biblioteki": "All parks in the library",
+ "Liczba seedów": "Number of seeds",
+ "20 na km ścieżki": "20 per km of path",
+ "z ustawień": "from the settings",
+ "Porównaj parki": "Compare parks",
+ "Wynik w parkach": "Output per park",
+ "Liczba botów": "Number of bots",
+ "Ustawienia z zakładki Symulacja na każdym parku z biblioteki, bez animacji, z seedami od 1 do podanej liczby. Botów jest tyle, ile w ustawieniach, albo 20 na kilometr ścieżki.": "The settings from the Simulation tab on every park in the library, without animation, with seeds from 1 to the given number. The number of bots is taken from the settings or set to 20 per kilometre of path."
 };
 
 // kategorie i etykiety parametrów z psm.GUI_PARAMETERS (po polsku w psm.py)

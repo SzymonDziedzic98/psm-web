@@ -104,7 +104,7 @@ details.cat > summary {
 .hint { font-size: 12px; color: var(--muted); margin: 0; }
 .source { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: grid; gap: 8px; }
 
-main { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+.results { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
 .displays { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; }
 @media (max-width: 1100px) { .displays { grid-template-columns: minmax(0, 1fr); } }
 figure.display { margin: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px; min-width: 0; }
@@ -168,6 +168,7 @@ code { font-family: var(--font-mono); font-size: 12.5px; }
   </div>
 </header>
 
+<main id="main">
 <nav class="tabs" role="tablist">
   <button role="tab" aria-selected="true" data-tab="sim">Symulacja</button>
   <button role="tab" aria-selected="false" data-tab="batch">Eksperyment batch</button>
@@ -177,7 +178,8 @@ code { font-family: var(--font-mono); font-size: 12.5px; }
 
 <!-- SYMULACJA -->
 <section data-panel="sim" class="layout">
-  <aside class="params">
+  <aside class="params" role="region">
+    <h2 class="sr-only">Ustawienia</h2>
     <div class="controls">
       <button class="btn primary" id="btnInit">Inicjalizuj</button>
       <button class="btn" id="btnRun" data-noi18n disabled>Start</button>
@@ -231,7 +233,7 @@ code { font-family: var(--font-mono); font-size: 12.5px; }
     <div id="paramForm"></div>
   </aside>
 
-  <main>
+  <div class="results">
     <div class="try-banner" id="tryBanner" hidden data-noi18n></div>
     <div id="messages"></div>
     <dl class="stats" id="stats"></dl>
@@ -284,7 +286,7 @@ code { font-family: var(--font-mono); font-size: 12.5px; }
         <button class="btn" id="dlConfig" disabled>config.json</button>
       </div>
     </div>
-  </main>
+  </div>
 </section>
 
 <!-- BATCH -->
@@ -337,8 +339,33 @@ code { font-family: var(--font-mono); font-size: 12.5px; }
       <div class="controls"><select id="bBoxMetric" aria-label="Wynik na wykresie" data-nosort></select></div>
       <canvas id="bBoxCanvas"></canvas>
     </div>
+    <div class="box-plot" id="bHeatBox" hidden>
+      <h2>Mapa ciepła: dwa zmieniane parametry</h2>
+      <p class="hint">Średnia wybranego wyniku w każdej kombinacji; kolor od najniższej (fioletowy) do najwyższej (żółty) wartości.</p>
+      <canvas id="bHeat" class="heat"></canvas>
+    </div>
     <div class="table-wrap" id="bTable"></div>
     <div class="controls"><button class="btn" id="bDl" disabled>results.csv</button><button class="btn" id="bDlSum" disabled>summary.csv</button><button class="btn" id="bDlCfg" disabled>config.json</button></div>
+  </div>
+  <div class="panel" id="parksPanel">
+    <h2>Wszystkie parki z biblioteki</h2>
+    <p class="hint">Ustawienia z zakładki Symulacja na każdym parku z biblioteki, bez animacji, z seedami od 1 do podanej liczby. Botów jest tyle, ile w ustawieniach, albo 20 na kilometr ścieżki.</p>
+    <div class="controls">
+      <div class="field"><label for="vCycles">Cykle</label><input type="number" id="vCycles" min="1" value="10000"></div>
+      <div class="field"><label for="vSeeds">Liczba seedów</label><input type="number" id="vSeeds" min="1" max="30" value="3"></div>
+      <div class="field wide"><label for="vN">Liczba botów</label>
+        <select id="vN" data-nosort><option value="params">z ustawień</option><option value="density">20 na km ścieżki</option></select></div>
+      <button class="btn primary" id="vRun">Porównaj parki</button>
+      <button class="btn" id="vStop" disabled>Zatrzymaj</button>
+    </div>
+    <p class="hint mono" id="vProg" data-noi18n>—</p>
+    <div class="table-wrap" id="vTable" data-noi18n></div>
+    <div class="box-plot" id="vBox" hidden>
+      <h2>Wynik w parkach</h2>
+      <div class="controls"><select id="vMetric" aria-label="Wynik na wykresie" data-nosort></select></div>
+      <canvas id="vCanvas"></canvas>
+    </div>
+    <div class="controls"><button class="btn" id="vDl" disabled>parks.csv</button></div>
   </div>
 </section>
 
@@ -413,63 +440,17 @@ code { font-family: var(--font-mono); font-size: 12.5px; }
     <pre class="cite" id="citeText" data-noi18n></pre>
     <div class="controls"><button class="btn small" id="btnCite">Kopiuj</button><button class="btn small" id="btnBib">Kopiuj BibTeX</button></div>
     <p class="hint" id="modelVer" data-noi18n></p>
+    <p class="hint" id="offlineNote" hidden data-noi18n></p>
   </div>
 </section>
+</main>
 
 <script>
 "use strict";
-let py = null, DEFAULTS = {}, TYPES = {}, GUI = [], RESTART = new Set(), CHOICES = {}, SENS = [], OUTPUTS = [];
-let isoVals = null;
-let running = false, hasModel = false, net = null, snap = null;
-let chart = null, histLen = 0;
-let osmJson = null, osmName = "";
-let batchStop = false, batchCsv = "";
-
-const $ = (id) => document.getElementById(id);
-const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-const tick = () => new Promise((r) => setTimeout(r, 0));
-I18N.init(I18N_EN);
-
-function showMsg(text, kind = "") {
-  const box = $("messages");
-  if (!text) { box.replaceChildren(); return; }
-  const div = document.createElement("div");
-  div.className = "msg " + kind;
-  div.textContent = text;
-  box.replaceChildren(div);
-}
-
-// ---------- ładowanie Pyodide + psm.py ----------
-async function boot() {
-  try {
-    $("loadMsg").textContent = L("Pobieranie interpretera Pythona…", "Downloading the Python interpreter…");
-    py = await loadPyodide();
-  } catch (e) {
-    UX.loadFailed(e);
-    return;
-  }
-  let src = null;
-  // GitHub Pages: psm.py obok strony; lokalnie (serwer w katalogu repo): ../src/psm.py
-  for (const url of ["psm.py", "../src/psm.py"]) {
-    try {
-      const r = await fetch(url, { cache: "no-cache" });
-      if (r.ok) { src = await r.text(); break; }
-    } catch (e) { /* file:// – wybór ręczny poniżej */ }
-  }
-  if (!src) {
-    $("loadPick").hidden = false;
-    $("loadBar").hidden = true;
-    $("pySrcFile").onchange = async (ev) => { await start(await ev.target.files[0].text()); };
-    return;
-  }
-  await start(src);
-}
-
-async function start(src) {
-  py.FS.writeFile("/home/pyodide/psm.py", src);
-  MODEL_HASH = await UX.hashText(src);
-  renderVersion();
-  py.runPython(`
+let py = null, DEFAULTS = {}, TYPES = {}, GUI = [], RESTART = new Set(), CHOICES = {}, SENS = [], OUTPUTS = [], SRC = "";
+const PYODIDE = "https://cdn.jsdelivr.net/pyodide/v0.26.4/full/";
+// kod startowy Pythona: ten sam na stronie i w obliczeniach w tle (bg.js)
+const SETUP_PY = `
 import sys, json
 sys.path.insert(0, "/home/pyodide")
 import psm
@@ -477,13 +458,15 @@ _M = None
 _INPUTS = None
 _HIST = 0
 
-def _init(params_json, seed, use_inputs):
-    global _M, _HIST
-    params = json.loads(params_json)
+def _new(params, seed, use_inputs):
     kw = {}
     if use_inputs and _INPUTS:
         kw = dict(roads=_INPUTS[0], obstacles=_INPUTS[1], boundary=_INPUTS[2])
-    _M = psm.Model(params, seed=None if seed == "" else int(seed), **kw)
+    return psm.Model(params, seed=None if seed == "" else int(seed), **kw)
+
+def _init(params_json, seed, use_inputs):
+    global _M, _HIST
+    _M = _new(json.loads(params_json), seed, use_inputs)
     _HIST = 0
     return _M.network_json()
 
@@ -531,21 +514,55 @@ def _plan(mode, spec_json, base_json):
         plan = psm.lhs_plan(None, int(spec["samples"]), seed)
     return json.dumps(plan)
 
-def _row(i, overrides_json, label):
-    r = psm.result_row(i, _M, json.loads(overrides_json), label)
-    _BROWS.append(r)
-    return json.dumps(_clean(r))
-
-def _analyze(mode, keys_json, base_json):
+def _summ(mode, rows, keys, base):
     if mode == "oat":
-        s = psm.oat_analysis(_BROWS, json.loads(base_json))
-    elif mode == "lhs":
-        s = psm.lhs_analysis(_BROWS)
-    else:
-        s = psm.group_summary(_BROWS, json.loads(keys_json))
-    global _BSUM
-    _BSUM = s
-    return json.dumps(_clean(s))
+        return psm.oat_analysis(rows, base)
+    if mode == "lhs":
+        return psm.lhs_analysis(rows)
+    return psm.group_summary(rows, keys)
+
+# zadania liczone w tle (bg.js) albo, bez workera, na stronie; nie ruszają _M strony
+def _run_to_end(m, chunk, ev):
+    while m.cycle < m.p["end_cycle"]:
+        before = m.cycle
+        m.run(int(chunk))
+        ev["cycle"] = m.cycle
+        yield json.dumps(ev)
+        if m.cycle == before:
+            break
+
+def _job_batch(plan_json, base_json, cycles, load_json, mode, keys_json):
+    load = json.loads(load_json)
+    if load:
+        _load(load[0], load[1])
+    plan, base, keys = json.loads(plan_json), json.loads(base_json), json.loads(keys_json)
+    rows = []
+    for i, (over, seed, label) in enumerate(plan):
+        params = dict(base)
+        params.update(over)
+        params["end_cycle"] = int(cycles)
+        m = _new(params, str(seed), bool(load))
+        yield from _run_to_end(m, 500, {"t": "cycle", "i": i})
+        r = psm.result_row(i, m, over, label)
+        rows.append(r)
+        s = _summ(mode, rows, keys, base)
+        yield json.dumps({"t": "row", "row": _clean(r), "summary": _clean(s),
+                          "csv": psm.dict_rows_csv(rows), "sum_csv": psm.dict_rows_csv(s)})
+
+def _job_runs(runs_json, cycles, chunk):
+    """Przebiegi bez animacji: runs = [{params, seed, park}]; park = plik sieci w FS albo null (park generowany)."""
+    runs, cur = json.loads(runs_json), None
+    for k, r in enumerate(runs):
+        park = r.get("park")
+        if park and park != cur:
+            _load(park, None)
+            cur = park
+        params = dict(r["params"])
+        if cycles:
+            params["end_cycle"] = int(cycles)
+        m = _new(params, str(r["seed"]), bool(park))
+        yield from _run_to_end(m, chunk, {"t": "cycle", "k": k})
+        yield json.dumps({"t": "run", "k": k, "m": _clean(m.metrics())})
 
 def _iso():
     c = _M.isovist_comparison()
@@ -556,7 +573,62 @@ def _osm_geojson(path):
     # zapis sieci po poprawkach (łączenie kawałków, uproszczenie, ślepe końce) w WGS84, ze znacznikiem
     r, o, b = psm.load_inputs(open(path, "rb").read(), None, path)
     return json.dumps(psm.processed_geojson(r, o, b, psm.LOAD_INFO["origin"], psm.LOAD_INFO), separators=(",", ":"))
-`);
+`;
+// T: powtórzenia, batch i zestawienie parków liczą się w tle, więc strona nie przestaje reagować
+const BG = UX.background({ pyodide: PYODIDE, setup: SETUP_PY, mainPy: () => py, files: async () => ({ "/home/pyodide/psm.py": SRC }) });
+const BG_START = ["Uruchamianie obliczeń w tle (za pierwszym razem kilka sekund)…", "Starting background computation (a few seconds the first time)…"];
+let isoVals = null;
+let running = false, hasModel = false, net = null, snap = null;
+let chart = null, histLen = 0;
+let osmJson = null, osmName = "";
+let batchCsv = "", batchSumCsv = "";
+
+const $ = (id) => document.getElementById(id);
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const tick = () => new Promise((r) => setTimeout(r, 0));
+I18N.init(I18N_EN);
+
+function showMsg(text, kind = "") {
+  const box = $("messages");
+  if (!text) { box.replaceChildren(); return; }
+  const div = document.createElement("div");
+  div.className = "msg " + kind;
+  div.textContent = text;
+  box.replaceChildren(div);
+}
+
+// ---------- ładowanie Pyodide + psm.py ----------
+async function boot() {
+  try {
+    $("loadMsg").textContent = L("Pobieranie interpretera Pythona…", "Downloading the Python interpreter…");
+    py = await loadPyodide();
+  } catch (e) {
+    UX.loadFailed(e);
+    return;
+  }
+  let src = null;
+  // GitHub Pages: psm.py obok strony; lokalnie (serwer w katalogu repo): ../src/psm.py
+  for (const url of ["psm.py", "../src/psm.py"]) {
+    try {
+      const r = await fetch(url, { cache: "no-cache" });
+      if (r.ok) { src = await r.text(); break; }
+    } catch (e) { /* file:// – wybór ręczny poniżej */ }
+  }
+  if (!src) {
+    $("loadPick").hidden = false;
+    $("loadBar").hidden = true;
+    $("pySrcFile").onchange = async (ev) => { await start(await ev.target.files[0].text()); };
+    return;
+  }
+  await start(src);
+}
+
+async function start(src) {
+  py.FS.writeFile("/home/pyodide/psm.py", src);
+  MODEL_HASH = await UX.hashText(src);
+  renderVersion();
+  py.runPython(SETUP_PY);
+  SRC = src;
   DEFAULTS = JSON.parse(py.runPython("json.dumps(psm.DEFAULTS)"));
   TYPES = JSON.parse(py.runPython("json.dumps({k: type(v).__name__ for k, v in psm.DEFAULTS.items()})"));
   GUI = JSON.parse(py.runPython("json.dumps(psm.GUI_PARAMETERS)"));
@@ -582,7 +654,11 @@ def _osm_geojson(path):
   UX.refresh();
   $("loading").hidden = true;
   await initModel();
-  startTour(false);
+  // R: link do eksperymentu „Co wypróbować” (?try=…) uruchamia go od razu, bez samouczka
+  const tl = UX.tryFromURL(TRY);
+  if (tl && tl.reps) runReps(tl.it);
+  else if (tl) runTry(tl.it, tl.v);
+  else startTour(false);
 }
 
 // ---------- formularz parametrów ----------
@@ -1021,11 +1097,19 @@ async function runBatch() {
   const base = readParams();
   const spec = { repeat: rep, seed: seed0 };
   let keys = [];
+  const files = {};
+  let load = null;
   try {
-    if (kind === "files") await loadFiles();
+    if (kind === "files") {
+      const rf = $("roadsFile").files[0], of = $("obsFile").files[0];
+      if (!rf) throw new Error(L("Wskaż plik ścieżek.", "Choose a paths file."));
+      files["/tmp/" + rf.name] = new Uint8Array(await rf.arrayBuffer());
+      if (of) files["/tmp/" + of.name] = new Uint8Array(await of.arrayBuffer());
+      load = ["/tmp/" + rf.name, of ? "/tmp/" + of.name : null];
+    }
     if (kind === "osm") {
       if (!osmJson) throw new Error(L("najpierw pobierz park z OSM", "fetch a park from OSM first"));
-      py.FS.writeFile("/tmp/osm.json", osmJson); py.globals.get("_load")("/tmp/osm.json", null);
+      files["/tmp/osm.json"] = osmJson; load = ["/tmp/osm.json", null];
     }
     if (mode === "planting") {
       spec.distances = parseList($("bDist").value, false); spec.shares = parseList($("bShare").value, false);
@@ -1043,41 +1127,34 @@ async function runBatch() {
   const plan = JSON.parse(py.globals.get("_plan")(mode, JSON.stringify(spec), JSON.stringify(base)));
   batchConfig = { model: "PSM", model_file: "psm.py", model_version: MODEL_HASH, app: location.origin + location.pathname,
     saved: new Date().toISOString(), batch: { mode, spec, cycles, runs: plan.length }, park: parkLabel(), params: base };
-  batchStop = false;
   $("bRun").disabled = true; $("bStop").disabled = false; $("bDl").disabled = true; $("bDlSum").disabled = true; $("bDlCfg").disabled = true;
   $("bProg").max = plan.length; $("bProg").value = 0;
-  py.runPython("_BROWS = []; _BSUM = []");
+  $("bTable").replaceChildren(); $("bSummary").replaceChildren(); boxState = null; renderBox();
+  $("bProgTxt").textContent = L(...BG_START);
   const rows = [];
   const t0 = performance.now();
-  let failed = "";
+  let failed = "", out = { stopped: false };
   try {
-  for (let i = 0; i < plan.length && !batchStop; i++) {
-    const [over, seed, label] = plan[i];
-    const params = Object.assign({}, base, over, { end_cycle: cycles });
-    try {
-      py.globals.get("_init")(JSON.stringify(params), String(seed), kind !== "generated");
-    } catch (e) { throw e; }
-    const desc = Object.entries(over).map(([k, v]) => `${k}=${typeof v === "number" ? +v.toFixed(4) : v}`).join(" · ");
-    let done = false;
-    while (!done && !batchStop) {
-      done = py.runPython("_M.run(500); _M.cycle >= _M.p['end_cycle']");
-      $("bProgTxt").textContent = `${L("przebieg", "run")} ${i + 1}/${plan.length} · ${desc || label} · seed ${seed} · ${L("cykl", "cycle")} ${py.runPython("_M.cycle")}`;
-      await tick();
-    }
-    if (batchStop) break;
-    rows.push(JSON.parse(py.globals.get("_row")(i, JSON.stringify(over), label)));
-    $("bProg").value = i + 1;
-    renderBatch(mode, rows, keys, base);
-  }
+    out = await BG.run("_job_batch(_J_plan, _J_base, _J_cyc, _J_load, _J_mode, _J_keys)",
+      { _J_plan: JSON.stringify(plan), _J_base: JSON.stringify(base), _J_cyc: cycles, _J_load: JSON.stringify(load), _J_mode: mode, _J_keys: JSON.stringify(keys) },
+      (ev) => {
+        const [over, seed, label] = plan[ev.i === undefined ? rows.length : ev.i];
+        if (ev.t === "cycle") {
+          const desc = Object.entries(over).map(([k, v]) => `${k}=${typeof v === "number" ? +v.toFixed(4) : v}`).join(" · ");
+          $("bProgTxt").textContent = `${L("przebieg", "run")} ${ev.i + 1}/${plan.length} · ${desc || label} · seed ${seed} · ${L("cykl", "cycle")} ${ev.cycle}`;
+          return;
+        }
+        rows.push(ev.row);
+        batchCsv = ev.csv; batchSumCsv = ev.sum_csv;
+        $("bProg").value = rows.length;
+        renderBatch(mode, rows, keys, ev.summary);
+      }, files);
   } catch (e) { failed = (e.message || String(e)).split("\n").slice(-2).join(" "); }
   const secs = ((performance.now() - t0) / 1000).toFixed(0);
-  $("bProgTxt").textContent = (failed ? L("Błąd: ", "Error: ") + failed : batchStop ? L("Zatrzymano", "Stopped") : L("Gotowe", "Done")) +
+  $("bProgTxt").textContent = (failed ? L("Błąd: ", "Error: ") + failed : out.stopped ? L("Zatrzymano", "Stopped") : L("Gotowe", "Done")) +
     ` · ${rows.length}/${plan.length} ${L("przebiegów", "runs")} · ${secs} s`;
-  batchCsv = py.runPython("psm.dict_rows_csv(_BROWS)");
   $("bRun").disabled = false; $("bStop").disabled = true; $("bDl").disabled = rows.length === 0; $("bDlSum").disabled = rows.length === 0;
   $("bDlCfg").disabled = rows.length === 0;
-  hasModel = false;
-  await initModel();
 }
 
 function dictTable(rows) {
@@ -1101,9 +1178,8 @@ function dictTable(rows) {
   return t;
 }
 
-function renderBatch(mode, rows, keys, base) {
+function renderBatch(mode, rows, keys, summ) {
   $("bTable").replaceChildren(dictTable(rows));
-  const summ = JSON.parse(py.globals.get("_analyze")(mode, JSON.stringify(keys), JSON.stringify(base)));
   const cap = document.createElement("h3");
   cap.textContent = mode === "oat" ? L("Elastyczności (ΔY/Y) / (ΔX/X)", "Elasticities (ΔY/Y) / (ΔX/X)")
     : mode === "lhs" ? L("Korelacja rang Spearmana parametr–wynik", "Spearman rank correlation parameter–output")
@@ -1117,6 +1193,7 @@ function renderBatch(mode, rows, keys, base) {
 let boxState = null;
 function renderBox() {
   const box = $("bBox");
+  $("bHeatBox").hidden = true;
   if (!boxState || !boxState.rows.length) { box.hidden = true; return; }
   box.hidden = false;
   const sel = $("bBoxMetric");
@@ -1134,6 +1211,12 @@ function renderBox() {
     if (typeof v === "number") groups.get(g).push(v);
   });
   UX.boxPlot($("bBoxCanvas"), [...groups].map(([label, values]) => ({ label, values })), sel.value);
+  // S: dwa zmieniane parametry -> mapa ciepła średniej
+  $("bHeatBox").hidden = vary.length !== 2;
+  if (vary.length === 2) {
+    const [kx, ky] = vary;
+    UX.heatFrom($("bHeat"), boxState.rows.map((r) => ({ x: r[kx], y: r[ky], v: r[sel.value] })), kx, ky, L("średnia: ", "mean: ") + sel.value);
+  }
 }
 
 // ---------- testy ----------
@@ -1191,9 +1274,9 @@ $("dlSummary").onclick = () => download("summary.csv", py.runPython("_M.summary_
 $("dlSeries").onclick = () => download("timeseries.csv", py.runPython("_M.timeseries_csv()"));
 $("dlFear").onclick = () => download("fear_edges.csv", py.runPython("_M.fear_csv()"));
 $("bRun").onclick = runBatch;
-$("bStop").onclick = () => { batchStop = true; };
+$("bStop").onclick = () => BG.stop();
 $("bDl").onclick = () => download("results.csv", batchCsv);
-$("bDlSum").onclick = () => download("summary.csv", py.runPython("psm.dict_rows_csv(_BSUM)"));
+$("bDlSum").onclick = () => download("summary.csv", batchSumCsv);
 $("bMode").onchange = batchModeChanged;
 $("layer").onchange = () => draw();
 $("dlEdges").onclick = () => download("edges.csv", py.runPython("_M.edge_csv()"));
@@ -1402,7 +1485,7 @@ const REP_METRICS = [
   { key: "fear_events", pl: "epizody lęku", en: "fear episodes" },
   { key: "feared_edges", pl: "odcinki ze strachem", en: "segments with fear" },
 ];
-let repStop = false, repLast = null;
+let repLast = null;
 function renderRep() {
   if (!repLast) return;
   $("repTitle").textContent = L("Powtórzenia: ", "Replicates: ") + L(repLast.it.title[0], repLast.it.title[1]);
@@ -1416,40 +1499,102 @@ async function runReps(it) {
   UX.tryBanner($("tryBanner"), null);
   const seeds = [1, 2, 3, 4, 5], res = it.variants.map(() => []);
   repLast = { it, seeds, res };
-  repStop = false;
   $("repPanel").hidden = false; $("repStop").disabled = false; $("repTable").replaceChildren();
   renderRep();
   $("repPanel").scrollIntoView({ behavior: "smooth", block: "start" });
+  $("repProg").textContent = L(...BG_START);
   const t0 = performance.now();
+  let err = "", out = { stopped: false };
+  const runs = [];
+  it.variants.forEach((v, vi) => seeds.forEach((seed) => runs.push({ vi, seed, park: null,
+    params: Object.assign({}, DEFAULTS, it.base, v.params, { park: "generated" }) })));
   try {
-    for (let vi = 0; vi < it.variants.length && !repStop; vi++) {
-      for (const seed of seeds) {
-        if (repStop) break;
-        const params = Object.assign({}, DEFAULTS, it.base, it.variants[vi].params, { park: "generated" });
-        py.globals.get("_init")(JSON.stringify(params), String(seed), false);
-        let done = false;
-        while (!done && !repStop) {
-          done = py.runPython("_M.run(1000); _M.cycle >= _M.p['end_cycle']");
-          $("repProg").textContent = `${L("wariant", "variant")} ${vi + 1}/${it.variants.length} · seed ${seed} · ${L("cykl", "cycle")} ${py.runPython("_M.cycle")} · ${((performance.now() - t0) / 1000).toFixed(0)} s`;
-          await tick();
-        }
-        if (repStop) break;
-        res[vi].push(JSON.parse(py.runPython("json.dumps(_M.metrics())")));
-        renderRep();
-      }
-    }
-  } catch (e) { $("repProg").textContent = L("Błąd: ", "Error: ") + (e.message || String(e)).split("\n").slice(-2).join(" "); }
-  if (!/Błąd|Error/.test($("repProg").textContent))
-    $("repProg").textContent = (repStop ? L("Zatrzymano", "Stopped") : L("Gotowe", "Done")) + ` · ${((performance.now() - t0) / 1000).toFixed(0)} s`;
+    out = await BG.run("_job_runs(_J_runs, 0, 1000)", { _J_runs: JSON.stringify(runs) }, (ev) => {
+      const r = runs[ev.k];
+      if (ev.t === "run") { res[r.vi].push(ev.m); renderRep(); return; }
+      $("repProg").textContent = `${L("wariant", "variant")} ${r.vi + 1}/${it.variants.length} · seed ${r.seed} · ${L("cykl", "cycle")} ${ev.cycle} · ${((performance.now() - t0) / 1000).toFixed(0)} s`;
+    });
+  } catch (e) { err = (e.message || String(e)).split("\n").slice(-2).join(" "); }
+  $("repProg").textContent = err ? L("Błąd: ", "Error: ") + err
+    : (out.stopped ? L("Zatrzymano", "Stopped") : L("Gotowe", "Done")) + ` · ${((performance.now() - t0) / 1000).toFixed(0)} s`;
   $("repStop").disabled = true;
-  hasModel = false;
-  await initModel();
 }
-$("repStop").onclick = () => { repStop = true; };
+$("repStop").onclick = () => BG.stop();
+$("repStop").after(UX.linkButton(() => UX.tryLink(TRY.indexOf(repLast.it), "reps"), true));
 UX.disabledHint("repStop", "Działa w trakcie liczenia powtórzeń.", "Active while replicates run.");
 
+// ---------- V: wszystkie parki z biblioteki ----------
+let parksRes = null;
+function parkGroups() {
+  const names = [...new Set(parksRes.runs.map((r) => r.name))].sort((a, b) => a.localeCompare(b, "pl"));
+  return names.map((name) => ({ label: name, N: parksRes.runs.find((r) => r.name === name).params.bot_nb, recs: parksRes.res.filter((r) => r.park === name) }));
+}
+function renderParks() {
+  if (!parksRes) return;
+  const groups = parkGroups();
+  UX.groupTable($("vTable"), groups, REP_METRICS, [{ pl: "botów", en: "bots", get: (g) => String(g.N) }]);
+  $("vBox").hidden = !parksRes.res.length;
+  if ($("vBox").hidden) return;
+  const sel = $("vMetric");
+  if (!sel.options.length) REP_METRICS.forEach((m) => sel.add(new Option(L(m.pl, m.en), m.key)));
+  [...sel.options].forEach((o) => { const m = REP_METRICS.find((x) => x.key === o.value); o.textContent = L(m.pl, m.en); });
+  UX.boxPlot($("vCanvas"), groups.map((g) => ({ label: g.label.replace(/^Park /, ""), values: g.recs.map((r) => r[sel.value]) })),
+    sel.options[sel.selectedIndex].textContent);
+}
+async function runParks() {
+  if (!py) return;
+  const cyc = Math.max(1, parseInt($("vCycles").value, 10) || 10000);
+  const ns = Math.min(30, Math.max(1, parseInt($("vSeeds").value, 10) || 1));
+  const dens = $("vN").value === "density";
+  const base = Object.assign(readParams(), { park: "file" });
+  $("vRun").disabled = true; $("vStop").disabled = false; $("vDl").disabled = true;
+  $("vProg").textContent = L(...BG_START);
+  const t0 = performance.now();
+  let err = "", out = { stopped: false };
+  try {
+    const lib = await parkLibrary(), files = {}, runs = [];
+    for (const [i, p] of lib.entries()) {
+      const r = await fetch("parki/" + p.file, { cache: "no-cache" });
+      if (!r.ok) throw new Error(p.file + ": HTTP " + r.status);
+      files["/tmp/park_" + i + ".json"] = await r.text();
+      for (let seed = 1; seed <= ns; seed++) runs.push({ name: p.name, seed, park: "/tmp/park_" + i + ".json",
+        params: Object.assign({}, base, dens ? { bot_nb: Math.max(1, Math.round(20 * p.length_m / 1000)) } : {}) });
+    }
+    parksRes = { runs, res: [], dens, cyc, base };
+    renderParks();
+    out = await BG.run("_job_runs(_J_runs, _J_cyc, 1000)", { _J_runs: JSON.stringify(runs), _J_cyc: cyc }, (ev) => {
+      const r = runs[ev.k];
+      if (ev.t === "run") { parksRes.res.push(Object.assign({ park: r.name, seed: r.seed, bot_nb: r.params.bot_nb }, ev.m)); renderParks(); return; }
+      $("vProg").textContent = `${parksRes.res.length + 1}/${runs.length} · ${r.name} · seed ${r.seed} · ${L("cykl", "cycle")} ${ev.cycle} · ${((performance.now() - t0) / 1000).toFixed(0)} s`;
+    }, files);
+  } catch (e) { err = (e.message || String(e)).split("\n").slice(-2).join(" "); }
+  $("vProg").textContent = err ? L("Błąd: ", "Error: ") + err
+    : (out.stopped ? L("Zatrzymano", "Stopped") : L("Gotowe", "Done")) + ` · ${parksRes ? parksRes.res.length : 0} ${L("przebiegów", "runs")} · ${((performance.now() - t0) / 1000).toFixed(0)} s`;
+  $("vRun").disabled = false; $("vStop").disabled = true; $("vDl").disabled = !(parksRes && parksRes.res.length);
+}
+$("vRun").onclick = runParks;
+$("vStop").onclick = () => BG.stop();
+$("vMetric").onchange = renderParks;
+$("vDl").onclick = () => {
+  const keys = ["park", "seed", "bot_nb", ...REP_METRICS.map((m) => m.key)];
+  const q = (v) => (typeof v === "string" && /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v);
+  download("parks.csv", [keys.join(","), ...parksRes.res.map((r) => keys.map((k) => q(r[k])).join(","))].join("\n") + "\n");
+};
+UX.disabledHint("vStop", "Działa w trakcie porównania parków.", "Active while the parks are compared.");
+UX.disabledHint("vDl", "Najpierw porównaj parki.", "Compare the parks first.");
+I18N.onChange(renderParks);
+
 // ---------- I, L, H, N: PNG, widok na telefon, samouczek, galeria parków ----------
-UX.pngButtons([...document.querySelectorAll('section[data-panel="sim"] figure.display'), $("cmpPanel"), $("bBox")]);
+UX.a11y({ main: $("main"), tabs: document.querySelector("nav.tabs"), live: [$("messages")], labels: [
+  [document.querySelector("aside.params"), "Ustawienia", "Settings"],
+  [$("map"), "Mapa parku: ścieżki w kolorze wybranej warstwy, krzewy, boty i phantom ze strefami.",
+    "Park map: paths coloured by the chosen layer, shrubs, bots and the phantom with its zones."],
+  [$("bBoxCanvas"), "Wykres pudełkowy wybranego wyniku w wariantach", "Box plot of the chosen output per variant"],
+  [$("bHeat"), "Mapa ciepła średniej wybranego wyniku dla dwóch parametrów", "Heat map of the mean of the chosen output for two parameters"],
+  [$("vCanvas"), "Wykres pudełkowy wybranego wyniku w parkach", "Box plot of the chosen output per park"],
+] });
+[$("map"), $("bBoxCanvas"), $("bHeat"), $("vCanvas")].forEach((c) => c.setAttribute("role", "img"));
+UX.pngButtons([...document.querySelectorAll('section[data-panel="sim"] figure.display'), $("cmpPanel"), $("bBox"), $("bHeatBox"), $("vBox")]);
 const MOB = UX.mobileTabs(document.querySelector('section[data-panel="sim"]'));
 $("bBoxMetric").onchange = renderBox;
 function startTour(force) {
@@ -1475,10 +1620,10 @@ parkLibrary().then((lib) => {
 }).catch(() => { $("parkGallery").hidden = true; });
 
 // ---------- jak cytować i wersja modelu ----------
-const CITE = "Dziedzic, S., Szurlej, M., & Kamiński, M. (2026). PSM: Proxemic Stress Model with route aversion " +
+const CITE = "Dziedzic, S., Szurlej, M., Kamiński, M., & Szarejko, M. (2026). PSM: Proxemic Stress Model with route aversion " +
   "(GAMA model, Python port and browser app) [Software]. https://github.com/SzymonDziedzic98/psm-web";
 function bibtex() {
-  return "@software{psm_web,\n  author = {Dziedzic, Szymon and Szurlej, Mikołaj and Kamiński, Maciej},\n" +
+  return "@software{psm_web,\n  author = {Dziedzic, Szymon and Szurlej, Mikołaj and Kamiński, Maciej and Szarejko, Maciej},\n" +
     "  title = {{PSM}: Proxemic Stress Model with route aversion ({GAMA} model, Python port and browser app)},\n" +
     "  year = {2026},\n  url = {https://github.com/SzymonDziedzic98/psm-web},\n" +
     "  note = {Model file psm.py" + (MODEL_HASH ? ", " + MODEL_HASH : "") + "}\n}";
@@ -1494,6 +1639,7 @@ $("btnCite").onclick = () => UX.copy(CITE);
 $("btnBib").onclick = () => UX.copy(bibtex());
 renderVersion();
 
+UX.offline($("offlineNote"));
 boot();
 </script>
 </body>
