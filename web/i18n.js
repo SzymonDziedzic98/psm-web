@@ -236,7 +236,7 @@ const I18N_EN = {
  "Liczba botów": "Number of bots",
  "GAMA": "GAMA",
  "Obliczenia w GAMA": "Computing in GAMA",
- "GAMA nie działa w przeglądarce. Strona przygotowuje model GAML z ustawieniami i parkiem z zakładki Symulacja, a wyniki z GAMA pokazuje obok Pythona z tymi samymi ustawieniami i seedami.": "GAMA does not run in the browser. The page prepares a GAML model with the settings and park from the Simulation tab, and shows the GAMA results next to Python with the same settings and seeds.",
+ "GAMA nie działa w przeglądarce. Strona przygotowuje model GAML z ustawieniami i parkiem z zakładki Symulacja, a wyniki z GAMA pokazuje obok Pythona z tymi samymi ustawieniami i seedami. Sprawdzone z GAMA 2025.6 (wyniki takie same jak w 1.9.3).": "GAMA does not run in the browser. The page prepares a GAML model with the settings and park from the Simulation tab, and shows the GAMA results next to Python with the same settings and seeds. Tested with GAMA 2025.6 (same results as 1.9.3).",
  "Sposób liczenia w GAMA": "How to compute in GAMA",
  "Pakiet: GAMA uruchamiasz sam": "Package: you run GAMA yourself",
  "Połączenie z GAMA na tym komputerze": "Connect to GAMA on this computer",
