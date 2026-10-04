@@ -9,7 +9,7 @@ Strona: https://szymondziedzic98.github.io/psm-web/ (bez instalacji; przełączn
 
 ## Model
 
-`models/PSM.gaml` (autorzy: Mikołaj Szurlej, Maciej Kamiński; do 4.10.2026 plik nazywał się `Hall_AC_aversion.gaml`, tej nazwy używają wcześniejsze materiały, m.in. artykuł UDI)
+`models/PSM.gaml`
 
 - **Strefy proksemiczne Halla** (intymna, osobista, społeczna, publiczna), skalowane parametrem `hall_multiplier`.
 - **Adrenalina i kortyzol**: fantom (agent badany) reaguje na obecność botów w swoich strefach; model śledzi też czujność (vigilance).
