@@ -62,6 +62,7 @@ header.top {
   padding-block: 16px 12px; border-bottom: 1px solid var(--line);
 }
 header.top p { margin: 0; color: var(--muted); max-width: 72ch; }
+.top a.btn { text-decoration: none; color: inherit; }
 .status { margin-left: auto; font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
 .status b { color: var(--ink); font-weight: 500; }
 .lang { display: flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
@@ -101,9 +102,12 @@ details.cat > summary {
 .field input[type="file"] { max-width: 100%; font-size: 12px; }
 .field.restart label::after { content: " ↻"; color: var(--accent); }
 .hint { font-size: 12px; color: var(--muted); margin: 0; }
+label.radio { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
+ol.steps { padding-left: 20px; display: grid; gap: 4px; }
+ol.steps code { overflow-wrap: anywhere; }
 .source { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: grid; gap: 8px; }
 
-main { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+.results { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
 .displays { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; }
 @media (max-width: 1100px) { .displays { grid-template-columns: minmax(0, 1fr); } }
 figure.display { margin: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px; min-width: 0; }
@@ -134,12 +138,13 @@ progress { width: 100%; height: 10px; accent-color: var(--park); }
 .msg.warn { border-color: var(--accent); }
 .loading { position: fixed; inset: 0; display: grid; place-items: center; background: var(--ground); z-index: 10; padding: 16px; }
 .loading .box { display: grid; gap: 10px; max-width: 420px; }
-ul.plain { margin: 0; padding-left: 18px; }
+ul.plain, ol.plain { margin: 0; padding-left: 18px; }
 code { font-family: var(--font-mono); font-size: 12.5px; }
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
 <script src="i18n.js"></script>
+<script src="ux.js"></script>
 </head>
 <body>
 
@@ -159,26 +164,32 @@ code { font-family: var(--font-mono); font-size: 12.5px; }
   <h1>PSM – stres proksemiczny i awersja do tras</h1>
   <p>Port modelu <code>Hall_AC_aversion.gaml</code> do Pythona, uruchamiany w przeglądarce. Parametry z oznaczeniem ↻ działają po ponownej inicjalizacji.</p>
   <div class="status" id="status"><span>cykl</span> <b id="stCycle">–</b> · <span>park</span> <b id="stNet">–</b></div>
+  <button type="button" class="btn small" id="btnTour">Samouczek</button>
+  <a class="btn small" href="modele.html" id="lnkModels">Modele doktoratu</a>
   <div class="lang" role="group" aria-label="Język / Language">
     <button type="button" data-lang="pl" lang="pl">PL</button><button type="button" data-lang="en" lang="en">EN</button>
   </div>
 </header>
 
+<main id="main">
 <nav class="tabs" role="tablist">
   <button role="tab" aria-selected="true" data-tab="sim">Symulacja</button>
   <button role="tab" aria-selected="false" data-tab="batch">Eksperyment batch</button>
+  <button role="tab" aria-selected="false" data-tab="gama">GAMA</button>
   <button role="tab" aria-selected="false" data-tab="tests">Testy</button>
-  <button role="tab" aria-selected="false" data-tab="about">O porcie</button>
+  <button role="tab" aria-selected="false" data-tab="about">O modelu</button>
 </nav>
 
 <!-- SYMULACJA -->
 <section data-panel="sim" class="layout">
-  <aside class="params">
+  <aside class="params" role="region">
+    <h2 class="sr-only">Ustawienia</h2>
     <div class="controls">
       <button class="btn primary" id="btnInit">Inicjalizuj</button>
       <button class="btn" id="btnRun" data-noi18n disabled>Start</button>
       <button class="btn" id="btnStep" disabled>Krok</button>
     </div>
+    <p class="hint">Skróty: <kbd>spacja</kbd> start/pauza, <kbd>→</kbd> krok</p>
     <div class="field"><label for="speed">Cykli na klatkę</label>
       <input type="number" id="speed" min="1" max="1000" value="10"></div>
     <div class="field"><label for="seed">Seed (puste = losowy)</label>
@@ -202,6 +213,7 @@ code { font-family: var(--font-mono); font-size: 12.5px; }
             <option>Park Zachodni</option>
             <option value="__custom">inna nazwa…</option>
           </select></div>
+        <div id="parkGallery"></div>
         <div class="field wide" id="osmCustomRow" hidden><label for="osmCustom">Nazwa w OSM</label>
           <input type="text" id="osmCustom" placeholder="np. Park Tołpy"></div>
         <div class="controls"><button class="btn" id="btnLib">Wczytaj gotowy</button>
@@ -219,10 +231,14 @@ code { font-family: var(--font-mono); font-size: 12.5px; }
       <p class="hint" id="srcInfo" data-noi18n></p>
     </div>
 
+    <div class="controls"><button class="btn small" id="btnLink">Link z ustawieniami</button>
+      <button class="btn small" id="btnReset">Przywróć domyślne</button></div>
+    <p class="hint" id="setInfo" data-noi18n></p>
     <div id="paramForm"></div>
   </aside>
 
-  <main>
+  <div class="results">
+    <div class="try-banner" id="tryBanner" hidden data-noi18n></div>
     <div id="messages"></div>
     <dl class="stats" id="stats"></dl>
     <div class="displays">
@@ -243,29 +259,38 @@ code { font-family: var(--font-mono); font-size: 12.5px; }
           <span style="--c: var(--bush)">przeszkody</span>
           <span style="--c: #d03020">znacznik strachu</span>
         </div>
+        <div id="mapScale" hidden data-noi18n></div>
         <p class="hint" id="layerInfo"></p>
       </figure>
       <figure class="display">
         <figcaption><h3>Phantom 0 – psychofizjologia</h3></figcaption>
         <div class="chart-box"><canvas id="chart"></canvas></div>
         <div class="legend">
-          <span style="--c: #2f6fb2">adrenalina</span>
-          <span style="--c: #8a4fbf">kortyzol</span>
+          <span style="--c: #0072b2">adrenalina</span>
+          <span style="--c: #e69f00">kortyzol</span>
           <span style="--c: var(--ink)">czujność</span>
         </div>
       </figure>
     </div>
+    <div class="panel" id="repPanel" hidden data-noi18n>
+      <h2 id="repTitle"></h2>
+      <p class="hint mono" id="repProg"></p>
+      <div class="controls"><button class="btn" id="repStop">Zatrzymaj</button></div>
+      <div class="table-wrap" id="repTable"></div>
+    </div>
+    <div class="panel" id="cmpPanel" data-noi18n></div>
     <div class="panel">
       <h2>Pliki wynikowe</h2>
-      <p class="hint"><code>summary.csv</code> jak w GAMA (zapis w cyklu <code>end_cycle − 1</code>), szereg czasowy phantoma 0, pamięć strachu na odcinkach oraz mapa stresu i widoczności (<code>edges.csv</code>).</p>
+      <p class="hint"><code>summary.csv</code> jak w GAMA (zapis w cyklu <code>end_cycle − 1</code>), szereg czasowy phantoma 0, pamięć strachu na odcinkach oraz mapa stresu i widoczności (<code>edges.csv</code>). <code>config.json</code> zapisuje ustawienia przebiegu, seed, park i wersję modelu.</p>
       <div class="controls">
         <button class="btn" id="dlSummary" disabled>summary.csv</button>
         <button class="btn" id="dlSeries" disabled>timeseries.csv</button>
         <button class="btn" id="dlFear" disabled>fear_edges.csv</button>
         <button class="btn" id="dlEdges" disabled>edges.csv (stres i izowisty)</button>
+        <button class="btn" id="dlConfig" disabled>config.json</button>
       </div>
     </div>
-  </main>
+  </div>
 </section>
 
 <!-- BATCH -->
@@ -282,10 +307,12 @@ code { font-family: var(--font-mono); font-size: 12.5px; }
           <option value="lhs">wrażliwość globalna (LHS)</option>
         </select></div>
     </div>
+    <p class="hint" data-mode="planting">Krzewy o stałej łącznej powierzchni w nasadzeniach sterowanych; zmienia się odstęp od skrzyżowań i udział w narożnikach. Każda kombinacja jest liczona tyle razy, ile powtórzeń.</p>
     <div class="controls" data-mode="planting">
       <div class="field wide"><label for="bDist">Odstęp od skrzyżowań (m)</label><input type="text" id="bDist" value="1, 4, 8, 12"></div>
       <div class="field wide"><label for="bShare">Udział w narożnikach</label><input type="text" id="bShare" value="0, 0.5, 1"></div>
     </div>
+    <p class="hint" data-mode="sweep" hidden>Wszystkie kombinacje podanych wartości jednego lub dwóch parametrów, każda tyle razy, ile powtórzeń.</p>
     <div class="controls" data-mode="sweep" hidden>
       <div class="field wide"><label for="bP1">Parametr 1</label><select id="bP1"></select></div>
       <div class="field wide"><label for="bV1">wartości</label><input type="text" id="bV1" value="0, 2.5, 5, 10"></div>
@@ -311,8 +338,92 @@ code { font-family: var(--font-mono); font-size: 12.5px; }
     <progress id="bProg" value="0" max="1"></progress>
     <p class="hint mono" id="bProgTxt" data-noi18n>—</p>
     <div class="table-wrap" id="bSummary"></div>
+    <div class="box-plot" id="bBox" hidden>
+      <h2>Rozkład wyniku w wariantach</h2>
+      <div class="controls"><select id="bBoxMetric" aria-label="Wynik na wykresie" data-nosort></select></div>
+      <canvas id="bBoxCanvas"></canvas>
+    </div>
+    <div class="box-plot" id="bHeatBox" hidden>
+      <h2>Mapa ciepła: dwa zmieniane parametry</h2>
+      <p class="hint">Średnia wybranego wyniku w każdej kombinacji; kolor od najniższej (fioletowy) do najwyższej (żółty) wartości.</p>
+      <canvas id="bHeat" class="heat"></canvas>
+    </div>
     <div class="table-wrap" id="bTable"></div>
-    <div class="controls"><button class="btn" id="bDl" disabled>results.csv</button><button class="btn" id="bDlSum" disabled>summary.csv</button></div>
+    <div class="controls"><button class="btn" id="bDl" disabled>results.csv</button><button class="btn" id="bDlSum" disabled>summary.csv</button><button class="btn" id="bDlCfg" disabled>config.json</button></div>
+  </div>
+  <div class="panel" id="parksPanel">
+    <h2>Wszystkie parki z biblioteki</h2>
+    <p class="hint">Ustawienia z zakładki Symulacja na każdym parku z biblioteki, bez animacji, z seedami od 1 do podanej liczby. Botów jest tyle, ile w ustawieniach, albo 20 na kilometr ścieżki.</p>
+    <div class="controls">
+      <div class="field"><label for="vCycles">Cykle</label><input type="number" id="vCycles" min="1" value="10000"></div>
+      <div class="field"><label for="vSeeds">Liczba seedów</label><input type="number" id="vSeeds" min="1" max="30" value="3"></div>
+      <div class="field wide"><label for="vN">Liczba botów</label>
+        <select id="vN" data-nosort><option value="params">z ustawień</option><option value="density">20 na km ścieżki</option></select></div>
+      <button class="btn primary" id="vRun">Porównaj parki</button>
+      <button class="btn" id="vStop" disabled>Zatrzymaj</button>
+    </div>
+    <p class="hint mono" id="vProg" data-noi18n>—</p>
+    <div class="table-wrap" id="vTable" data-noi18n></div>
+    <div class="box-plot" id="vBox" hidden>
+      <h2>Wynik w parkach</h2>
+      <div class="controls"><select id="vMetric" aria-label="Wynik na wykresie" data-nosort></select></div>
+      <canvas id="vCanvas"></canvas>
+    </div>
+    <div class="controls"><button class="btn" id="vDl" disabled>parks.csv</button></div>
+  </div>
+</section>
+
+<!-- GAMA -->
+<section data-panel="gama" hidden>
+  <div class="panel">
+    <h2>Obliczenia w GAMA</h2>
+    <p class="hint">GAMA nie działa w przeglądarce. Strona przygotowuje model GAML z ustawieniami i parkiem z zakładki Symulacja, a wyniki z GAMA pokazuje obok Pythona z tymi samymi ustawieniami i seedami.</p>
+    <div class="controls" role="radiogroup" aria-label="Sposób liczenia w GAMA">
+      <label class="radio"><input type="radio" name="gMode" value="pkg" checked> Pakiet: GAMA uruchamiasz sam</label>
+      <label class="radio"><input type="radio" name="gMode" value="server"> Połączenie z GAMA na tym komputerze</label>
+    </div>
+    <div class="controls">
+      <div class="field wide"><label for="gSeeds">Seedy</label><input type="text" id="gSeeds" value="1, 2, 3, 4, 5"></div>
+    </div>
+    <p class="hint" id="gCycles" data-noi18n></p>
+    <div data-gmode="pkg">
+      <ol class="hint steps">
+        <li>Pobierz pakiet: model GAML z bieżącymi ustawieniami, park w plikach SHP i skrypty uruchomienia.</li>
+        <li>Rozpakuj go i uruchom <code>bash run_gama.sh /ścieżka/do/GAMA</code> (Windows: <code>run_gama.bat C:\ścieżka\do\GAMA</code>) albo otwórz model w oknie GAMA (opis w README.txt).</li>
+        <li>Wczytaj tu plik <code>results/summary_….csv</code>.</li>
+      </ol>
+      <div class="controls">
+        <button class="btn primary" id="gPkg">Pobierz pakiet (ZIP)</button>
+      </div>
+      <div class="field stack"><label for="gFile">Wyniki z GAMA (summary_….csv)</label><input type="file" id="gFile" accept=".csv"></div>
+    </div>
+    <div data-gmode="server" hidden>
+      <ol class="hint steps">
+        <li>Pobierz pakiet i rozpakuj go do jednego folderu (kolejne pakiety do tego samego).</li>
+        <li>Uruchom GAMA jako serwer: <code>gama-headless.sh -socket 6868</code> w katalogu <code>headless</code> GAMA (Windows: <code>gama-headless.bat -socket 6868</code>).</li>
+        <li>Podaj pełną ścieżkę folderu z pakietem i kliknij „Licz w GAMA”. Przeglądarka może zapytać o zgodę na połączenie z tym komputerem.</li>
+      </ol>
+      <div class="controls">
+        <div class="field wide"><label for="gUrl">Adres serwera GAMA</label><input type="text" id="gUrl" value="ws://localhost:6868" data-noi18n></div>
+        <div class="field wide"><label for="gDir">Folder z pakietem</label><input type="text" id="gDir" placeholder="np. /home/ja/psm_gama"></div>
+      </div>
+      <div class="controls">
+        <button class="btn" id="gPkg2">Pobierz pakiet (ZIP)</button>
+        <button class="btn primary" id="gRun">Licz w GAMA</button>
+        <button class="btn" id="gStop" disabled>Zatrzymaj</button>
+      </div>
+    </div>
+    <p class="hint mono" id="gProg" data-noi18n>—</p>
+    <p class="hint" id="gParams" data-noi18n></p>
+    <div class="table-wrap" id="gTable" data-noi18n></div>
+    <p class="hint" id="gNote" data-noi18n></p>
+    <div class="box-plot" id="gBox" hidden>
+      <h2>GAMA i Python</h2>
+      <div class="controls"><select id="gMetric" aria-label="Wynik na wykresie" data-nosort></select></div>
+      <canvas id="gCanvas"></canvas>
+    </div>
+    <div class="table-wrap" id="gSeedTable" data-noi18n></div>
+    <div class="controls"><button class="btn" id="gDl" disabled>gama_python.csv</button></div>
   </div>
 </section>
 
@@ -325,10 +436,41 @@ code { font-family: var(--font-mono); font-size: 12.5px; }
   </div>
 </section>
 
-<!-- O PORCIE -->
+<!-- O MODELU -->
 <section data-panel="about" hidden>
   <div class="panel" style="max-width: 78ch">
-    <h2>Co odwzorowuje ten port</h2>
+    <h2>O modelu</h2>
+    <h3>Czym jest model</h3>
+    <p>PSM (Proxemic Stress Model) symuluje stres osoby idącej przez park. Jeden agent, phantom, idzie alejkami między innymi spacerowiczami (botami) i reaguje na to, jak blisko nich jest. Model pozwala porównać warianty nasadzeń i układu ścieżek, zanim powstaną w terenie.</p>
+    <h3>Jak działa</h3>
+    <ul class="plain">
+      <li>Wokół phantoma są cztery strefy Halla: intymna, osobista, społeczna i publiczna. Ich promienie to promienie Halla razy mnożnik stref (domyślnie 4).</li>
+      <li>W każdym cyklu phantom sprawdza, w której strefie jest każdy widoczny bot. Gdy bot przeskoczy do bliższej strefy, czujność rośnie z kwadratem tego skoku, więc nagłe pojawienie się kogoś tuż obok kosztuje dużo więcej niż powolne zbliżanie się.</li>
+      <li>Przeszkody, np. krzewy, zasłaniają widok. Bot ukryty za krzewem jest niewidoczny, dopóki zza niego nie wyjdzie, często od razu w bliskiej strefie. Dlatego krzewy w narożnikach skrzyżowań podnoszą stres.</li>
+      <li>Czujność dodaje się do adrenaliny, która powoli wygasa, a adrenalina podnosi kortyzol. Gdy adrenalina przekroczy próg lęku, phantom zostawia znacznik strachu i odkłada strach na odcinku, na którym stoi.</li>
+      <li>Przy awersji do tras phantom wybiera najkrótszą trasę ważoną pamięcią strachu, więc z czasem omija odcinki, na których się bał. Pamięć strachu powoli zanika.</li>
+    </ul>
+    <h3>Jak używać</h3>
+    <ol class="plain">
+      <li>Wybierz park: generowany, gotowy z biblioteki (OpenStreetMap, Wrocław) albo własne pliki.</li>
+      <li>Ustaw najważniejsze parametry w panelu po lewej; pozostałe są pod przyciskiem „Pokaż wszystkie parametry”. Najedź na nazwę parametru albo kliknij „?”, żeby zobaczyć opis.</li>
+      <li>Kliknij Inicjalizuj, potem Start (spacja) albo Krok (→).</li>
+      <li>Obserwuj mapę (pamięć strachu, stres albo izowisty na ścieżkach) i wykres adrenaliny, kortyzolu i czujności phantoma.</li>
+      <li>Żeby porównać dwa warianty, kliknij „Zapamiętaj ten przebieg” w panelu porównania, zmień ustawienia, kliknij Inicjalizuj i uruchom ponownie.</li>
+      <li>Pobierz pliki CSV razem z <code>config.json</code>, który zapisuje ustawienia przebiegu. Wiele przebiegów naraz policzysz w zakładce Eksperyment batch.</li>
+    </ol>
+    <h3>Na co zwrócić uwagę</h3>
+    <ul class="plain">
+      <li>Jeden przebieg to jedna losowa historia. Wnioski wyciągaj z kilku powtórzeń z różnymi seedami (zakładka Eksperyment batch).</li>
+      <li>Liczy się położenie krzewów względem skrzyżowań, a nie tylko ich łączna powierzchnia. Nasadzenia sterowane trzymają stałą powierzchnię, więc warianty różnią się tylko układem.</li>
+      <li>Efekt krzewu zależy od wielkości stref: krzew, który zasłania kogoś daleko poza strefą społeczną, niewiele zmienia.</li>
+      <li>Przy małej liczbie botów spotkań jest mało i różnice między wariantami giną w szumie. Układ nasadzeń oceniaj przy dużym obłożeniu parku.</li>
+      <li>Pole widoczności (izowista) mierzy, ile widać z danego miejsca, a nie to, czy ktoś wyłania się nagle zza przeszkody. Porównaj warstwę izowist z warstwą stresu.</li>
+    </ul>
+    <h3>Co wypróbować</h3>
+    <p class="hint">Każdy przycisk ustawia parametry na parku generowanym, inicjalizuje model z seedem 1 i uruchamia go do 10 000 cykli. Po pierwszym wariancie uruchom drugi: pierwszy zostanie zapamiętany i oba pojawią się na wykresie porównania w zakładce Symulacja.</p>
+    <div class="try-list" id="tryList" data-noi18n></div>
+    <h3>Co odwzorowuje ten port</h3>
     <p>Plik <code>psm.py</code> zawiera model z <code>models/Hall_AC_aversion.gaml</code>: sieć ścieżek jako graf ważony długością × (1 + aversion_strength × fear_memory), boty i phantomy idące najkrótszą ważoną trasą do losowego punktu, strefy Halla (1,8 / 4,8 / 14,4 / 40 m przy mnożniku 4) zasłaniane przez przeszkody, czujność, adrenalinę i kortyzol phantoma, próg lęku 11,5, znaczniki strachu, odkładanie i zanikanie pamięci strachu na odcinkach oraz zapis <code>summary.csv</code>.</p>
     <h3>Różnice względem GAMA</h3>
     <ul class="plain">
@@ -351,62 +493,22 @@ code { font-family: var(--font-mono); font-size: 12.5px; }
     <p>Park generowany to siatka alejek z łukami i pętlą obwodową, z krzewami w narożnikach skrzyżowań (ślepe narożniki) i wzdłuż alejek. Park z OpenStreetMap pobiera przeglądarka bezpośrednio z Overpass API. Oryginalne pliki <code>Staszica_SHP_*.shp</code> można wczytać jako własne pliki.</p>
     <h3>Uruchamianie poza przeglądarką</h3>
     <p><code>python psm.py --test</code>, <code>python psm.py --run --roads Staszica_SHP_sciezki_01.shp --obstacles Staszica_SHP_krzaki_09.shp</code>, <code>python psm.py --batch --aversion 0,2.5,5 --repeat 5</code>, <code>python psm.py --fetch-osm "Park Staszica" --out park.geojson</code>.</p>
+    <h3>Jak cytować</h3>
+    <p>Do czasu publikacji artykułu cytuj oprogramowanie z repozytorium (plik <code>CITATION.cff</code>). Artykuł z wynikami modelu jest w recenzji; odnośnik do niego dodamy po publikacji.</p>
+    <pre class="cite" id="citeText" data-noi18n></pre>
+    <div class="controls"><button class="btn small" id="btnCite">Kopiuj</button><button class="btn small" id="btnBib">Kopiuj BibTeX</button></div>
+    <p class="hint" id="modelVer" data-noi18n></p>
+    <p class="hint" id="offlineNote" hidden data-noi18n></p>
   </div>
 </section>
+</main>
 
 <script>
 "use strict";
-let py = null, DEFAULTS = {}, TYPES = {}, GUI = [], RESTART = new Set(), CHOICES = {}, SENS = [];
-let isoVals = null;
-let running = false, hasModel = false, net = null, snap = null;
-let chart = null, histLen = 0;
-let osmJson = null, osmName = "";
-let batchStop = false, batchCsv = "";
-
-const $ = (id) => document.getElementById(id);
-const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-const tick = () => new Promise((r) => setTimeout(r, 0));
-I18N.init(I18N_EN);
-
-function showMsg(text, kind = "") {
-  const box = $("messages");
-  if (!text) { box.replaceChildren(); return; }
-  const div = document.createElement("div");
-  div.className = "msg " + kind;
-  div.textContent = text;
-  box.replaceChildren(div);
-}
-
-// ---------- ładowanie Pyodide + psm.py ----------
-async function boot() {
-  try {
-    $("loadMsg").textContent = L("Pobieranie interpretera Pythona…", "Downloading the Python interpreter…");
-    py = await loadPyodide();
-  } catch (e) {
-    $("loadMsg").textContent = L("Nie udało się pobrać Pyodide: ", "Could not download Pyodide: ") + e.message +
-      L(". Sprawdź połączenie z internetem.", ". Check your internet connection.");
-    return;
-  }
-  let src = null;
-  // GitHub Pages: psm.py obok strony; lokalnie (serwer w katalogu repo): ../src/psm.py
-  for (const url of ["psm.py", "../src/psm.py"]) {
-    try {
-      const r = await fetch(url, { cache: "no-cache" });
-      if (r.ok) { src = await r.text(); break; }
-    } catch (e) { /* file:// – wybór ręczny poniżej */ }
-  }
-  if (!src) {
-    $("loadPick").hidden = false;
-    $("loadBar").hidden = true;
-    $("pySrcFile").onchange = async (ev) => { await start(await ev.target.files[0].text()); };
-    return;
-  }
-  await start(src);
-}
-
-async function start(src) {
-  py.FS.writeFile("/home/pyodide/psm.py", src);
-  py.runPython(`
+let py = null, DEFAULTS = {}, TYPES = {}, GUI = [], RESTART = new Set(), CHOICES = {}, SENS = [], OUTPUTS = [], SRC = "";
+const PYODIDE = "https://cdn.jsdelivr.net/pyodide/v0.26.4/full/";
+// kod startowy Pythona: ten sam na stronie i w obliczeniach w tle (bg.js)
+const SETUP_PY = `
 import sys, json
 sys.path.insert(0, "/home/pyodide")
 import psm
@@ -414,13 +516,15 @@ _M = None
 _INPUTS = None
 _HIST = 0
 
-def _init(params_json, seed, use_inputs):
-    global _M, _HIST
-    params = json.loads(params_json)
+def _new(params, seed, use_inputs):
     kw = {}
     if use_inputs and _INPUTS:
         kw = dict(roads=_INPUTS[0], obstacles=_INPUTS[1], boundary=_INPUTS[2])
-    _M = psm.Model(params, seed=None if seed == "" else int(seed), **kw)
+    return psm.Model(params, seed=None if seed == "" else int(seed), **kw)
+
+def _init(params_json, seed, use_inputs):
+    global _M, _HIST
+    _M = _new(json.loads(params_json), seed, use_inputs)
     _HIST = 0
     return _M.network_json()
 
@@ -468,21 +572,74 @@ def _plan(mode, spec_json, base_json):
         plan = psm.lhs_plan(None, int(spec["samples"]), seed)
     return json.dumps(plan)
 
-def _row(i, overrides_json, label):
-    r = psm.result_row(i, _M, json.loads(overrides_json), label)
-    _BROWS.append(r)
-    return json.dumps(_clean(r))
-
-def _analyze(mode, keys_json, base_json):
+def _summ(mode, rows, keys, base):
     if mode == "oat":
-        s = psm.oat_analysis(_BROWS, json.loads(base_json))
-    elif mode == "lhs":
-        s = psm.lhs_analysis(_BROWS)
+        return psm.oat_analysis(rows, base)
+    if mode == "lhs":
+        return psm.lhs_analysis(rows)
+    return psm.group_summary(rows, keys)
+
+# zadania liczone w tle (bg.js) albo, bez workera, na stronie; nie ruszają _M strony
+def _run_to_end(m, chunk, ev):
+    while m.cycle < m.p["end_cycle"]:
+        before = m.cycle
+        m.run(int(chunk))
+        ev["cycle"] = m.cycle
+        yield json.dumps(ev)
+        if m.cycle == before:
+            break
+
+def _job_batch(plan_json, base_json, cycles, load_json, mode, keys_json):
+    load = json.loads(load_json)
+    if load:
+        _load(load[0], load[1])
+    plan, base, keys = json.loads(plan_json), json.loads(base_json), json.loads(keys_json)
+    rows = []
+    for i, (over, seed, label) in enumerate(plan):
+        params = dict(base)
+        params.update(over)
+        params["end_cycle"] = int(cycles)
+        m = _new(params, str(seed), bool(load))
+        yield from _run_to_end(m, 500, {"t": "cycle", "i": i})
+        r = psm.result_row(i, m, over, label)
+        rows.append(r)
+        s = _summ(mode, rows, keys, base)
+        yield json.dumps({"t": "row", "row": _clean(r), "summary": _clean(s),
+                          "csv": psm.dict_rows_csv(rows), "sum_csv": psm.dict_rows_csv(s)})
+
+def _job_runs(runs_json, cycles, chunk):
+    """Przebiegi bez animacji: runs = [{params, seed, park}]; park = plik sieci w FS albo null (park generowany)."""
+    runs, cur = json.loads(runs_json), None
+    for k, r in enumerate(runs):
+        park = r.get("park")
+        if park and (park, r.get("obst")) != cur:
+            _load(park, r.get("obst"))
+            cur = (park, r.get("obst"))
+        params = dict(r["params"])
+        if cycles:
+            params["end_cycle"] = int(cycles)
+        m = _new(params, str(r["seed"]), bool(park))
+        yield from _run_to_end(m, chunk, {"t": "cycle", "k": k})
+        ph = [[q.total_adrenaline, q.total_cortisol, q.total_vigilance] for q in m.phantoms]
+        yield json.dumps({"t": "run", "k": k, "m": _clean(m.metrics()), "ph": _clean(ph)})
+
+# zakładka GAMA: kopia modelu GAML z ustawieniami strony i geometrią parku (web/gama_export.py)
+def _gama_build(params_json, use_inputs, seeds_json, meta_json, gaml_src, want_zip):
+    import gama_export
+    p = dict(psm.DEFAULTS)
+    p.update(json.loads(params_json))
+    m = _new(p, "1", use_inputs)
+    if want_zip:
+        z, rep, info = gama_export.package(m, p, gaml_src, json.loads(seeds_json), json.loads(meta_json))
+        with open("/tmp/psm_gama.zip", "wb") as f:
+            f.write(z)
     else:
-        s = psm.group_summary(_BROWS, json.loads(keys_json))
-    global _BSUM
-    _BSUM = s
-    return json.dumps(_clean(s))
+        _files, rep, info = gama_export.build(m, p, gaml_src)
+    return json.dumps(_clean({"report": rep, "info": info}))
+
+def _gama_read(text):
+    import gama_export
+    return json.dumps(gama_export.read_summary(text))
 
 def _iso():
     c = _M.isovist_comparison()
@@ -493,13 +650,69 @@ def _osm_geojson(path):
     # zapis sieci po poprawkach (łączenie kawałków, uproszczenie, ślepe końce) w WGS84, ze znacznikiem
     r, o, b = psm.load_inputs(open(path, "rb").read(), None, path)
     return json.dumps(psm.processed_geojson(r, o, b, psm.LOAD_INFO["origin"], psm.LOAD_INFO), separators=(",", ":"))
-`);
+`;
+// T: powtórzenia, batch i zestawienie parków liczą się w tle, więc strona nie przestaje reagować
+const BG = UX.background({ pyodide: PYODIDE, setup: SETUP_PY, mainPy: () => py, files: async () => ({ "/home/pyodide/psm.py": SRC }) });
+const BG_START = ["Uruchamianie obliczeń w tle (za pierwszym razem kilka sekund)…", "Starting background computation (a few seconds the first time)…"];
+let isoVals = null;
+let running = false, hasModel = false, net = null, snap = null;
+let chart = null, histLen = 0;
+let osmJson = null, osmName = "";
+let batchCsv = "", batchSumCsv = "";
+
+const $ = (id) => document.getElementById(id);
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const tick = () => new Promise((r) => setTimeout(r, 0));
+I18N.init(I18N_EN);
+
+function showMsg(text, kind = "") {
+  const box = $("messages");
+  if (!text) { box.replaceChildren(); return; }
+  const div = document.createElement("div");
+  div.className = "msg " + kind;
+  div.textContent = text;
+  box.replaceChildren(div);
+}
+
+// ---------- ładowanie Pyodide + psm.py ----------
+async function boot() {
+  try {
+    $("loadMsg").textContent = L("Pobieranie interpretera Pythona…", "Downloading the Python interpreter…");
+    py = await loadPyodide();
+  } catch (e) {
+    UX.loadFailed(e);
+    return;
+  }
+  let src = null;
+  // GitHub Pages: psm.py obok strony; lokalnie (serwer w katalogu repo): ../src/psm.py
+  for (const url of ["psm.py", "../src/psm.py"]) {
+    try {
+      const r = await fetch(url, { cache: "no-cache" });
+      if (r.ok) { src = await r.text(); break; }
+    } catch (e) { /* file:// – wybór ręczny poniżej */ }
+  }
+  if (!src) {
+    $("loadPick").hidden = false;
+    $("loadBar").hidden = true;
+    $("pySrcFile").onchange = async (ev) => { await start(await ev.target.files[0].text()); };
+    return;
+  }
+  await start(src);
+}
+
+async function start(src) {
+  py.FS.writeFile("/home/pyodide/psm.py", src);
+  MODEL_HASH = await UX.hashText(src);
+  renderVersion();
+  py.runPython(SETUP_PY);
+  SRC = src;
   DEFAULTS = JSON.parse(py.runPython("json.dumps(psm.DEFAULTS)"));
   TYPES = JSON.parse(py.runPython("json.dumps({k: type(v).__name__ for k, v in psm.DEFAULTS.items()})"));
   GUI = JSON.parse(py.runPython("json.dumps(psm.GUI_PARAMETERS)"));
   RESTART = new Set(JSON.parse(py.runPython("json.dumps(sorted(psm.RESTART_KEYS))")));
   CHOICES = JSON.parse(py.runPython("json.dumps(psm.CHOICES)"));
   SENS = JSON.parse(py.runPython("json.dumps(list(psm.SENS_PARAMS))"));
+  OUTPUTS = JSON.parse(py.runPython("json.dumps(list(psm.OUTPUTS))"));
   GAP = py.runPython("psm.OSM_BRIDGE_GAP");
   renderOsmInfo();
   const numKeys = Object.keys(DEFAULTS).filter((k) => ["int", "float", "NoneType"].includes(TYPES[k]));
@@ -511,8 +724,18 @@ def _osm_geojson(path):
   $("bP1").value = "aversion_strength";
   renderSpec();
   buildForm();
+  UX.basicAdvanced($("paramForm"), BASIC_KEYS);
+  UX.sliders(SLIDERS);
+  sortSelects();
+  initSettings();
+  UX.refresh();
   $("loading").hidden = true;
   await initModel();
+  // R: link do eksperymentu „Co wypróbować” (?try=…) uruchamia go od razu, bez samouczka
+  const tl = UX.tryFromURL(TRY);
+  if (tl && tl.reps) runReps(tl.it);
+  else if (tl) runTry(tl.it, tl.v);
+  else startTour(false);
 }
 
 // ---------- formularz parametrów ----------
@@ -556,6 +779,7 @@ function buildForm() {
       } else { inp.type = "number"; inp.step = "any"; inp.value = v; inp.dataset.kind = "float"; }
       inp.addEventListener("change", onParamChange);
       row.append(lab, inp);
+      if (PARAM_HELP[key]) UX.paramHelp(lab, () => paramHelpText(key));
       fields.append(row);
     }
     det.append(fields);
@@ -563,9 +787,15 @@ function buildForm() {
   });
 }
 
+function paramHelpText(key) {
+  const h = PARAM_HELP[key];
+  return L(h[0], h[1]) + L(" Domyślnie: ", " Default: ") + UX.fmtValue(DEFAULTS[key]) + "." +
+    (RESTART.has(key) ? L(" Działa po ponownej inicjalizacji (↻).", " Takes effect after re-initialisation (↻).") : "");
+}
+
 function readParams() {
   const p = {};
-  document.querySelectorAll("#paramForm input, #paramForm select").forEach((inp) => {
+  document.querySelectorAll("#paramForm input[data-key], #paramForm select[data-key]").forEach((inp) => {
     const k = inp.dataset.key, kind = inp.dataset.kind;
     if (kind === "choice") p[k] = inp.value;
     else if (kind === "bool") p[k] = inp.checked;
@@ -581,11 +811,12 @@ function onParamChange(ev) {
   if (!hasModel) return;
   const key = ev.target.dataset.key;
   if (RESTART.has(key)) {
-    showMsg(L("Zmiana „", "The change to “") + ev.target.previousSibling.textContent +
+    showMsg(L("Zmiana „", "The change to “") + document.querySelector(`label[for="${ev.target.id}"]`).textContent +
       L("” zadziała po ponownej inicjalizacji.", "” takes effect after re-initialisation."), "warn");
     return;
   }
   py.globals.get("_set_params")(JSON.stringify(readParams()));
+  liveChanged = true;
   refresh(JSON.parse(py.globals.get("_advance")(0)));
 }
 
@@ -729,12 +960,18 @@ async function initModel() {
     return;
   }
   hasModel = true;
+  UX.ready();
+  runNo += 1;
+  lastConfig = simConfig();
+  liveChanged = false;
+  CMP.start(tryLabel || [`Przebieg ${runNo}`, `Run ${runNo}`], Object.assign({ park: parkLabel(), seed: $("seed").value.trim() || "–" }, readParams()));
+  tryLabel = null;
   histLen = 0;
   resetChart();
   renderNet();
   if (net.n_components > 1) showMsg(L("Sieć ma ", "The network has ") + net.n_components +
     L(" rozłączne części; agenci chodzą po największej.", " separate parts; agents walk on the largest one."), "warn");
-  ["btnRun", "btnStep", "dlSummary", "dlSeries", "dlFear", "dlEdges", "btnIso"].forEach((id) => $(id).disabled = false);
+  ["btnRun", "btnStep", "dlSummary", "dlSeries", "dlFear", "dlEdges", "dlConfig", "btnIso"].forEach((id) => $(id).disabled = false);
   isoVals = null;
   isoCmp = null;
   renderLayerInfo();
@@ -753,6 +990,9 @@ function refresh(res) {
   }
   if (res.hist.length) chart.update("none");
   $("stCycle").textContent = snap.cycle;
+  const m = snap.metrics;
+  CMP.record(snap.cycle, { total_adrenaline: m.total_adrenaline, fear_events: m.fear_events, feared_edges: m.feared_edges,
+    adrenaline: m.adrenaline, cortisol: m.cortisol });
   renderStats();
   draw();
   if (snap.finished) {
@@ -858,6 +1098,12 @@ function draw() {
     ctx.stroke();
   });
   ctx.globalAlpha = 1;
+  UX.scaleBar($("mapScale"), layer === "fear"
+    ? { title: ["Kolor ścieżki: pamięć strachu na odcinku", "Path colour: fear memory on the segment"], stops: [pathCol, "rgb(120,48,38)", "rgb(255,0,0)"], min: 0, max: 5.5, plus: true }
+    : layer === "stress" ? { title: ["Kolor ścieżki: średnia adrenalina phantoma na odcinku", "Path colour: the phantom's mean adrenaline on the segment"],
+        stops: ["hsl(40,20%,55%)", "hsl(20,55%,48%)", "hsl(0,90%,40%)"], min: vmin, max: vmax }
+    : vals ? { title: ["Kolor ścieżki: pole izowisty (m²)", "Path colour: isovist area (m²)"], stops: ["hsl(210,70%,25%)", "hsl(210,30%,75%)"], min: vmin, max: vmax }
+    : null);
   for (const [x, y, a] of snap.fears) {
     ctx.beginPath(); ctx.arc(view.X(x), view.Y(y), 10 * s, 0, 2 * Math.PI);
     ctx.fillStyle = `rgba(208,48,32,${(a / 255 * 0.55).toFixed(3)})`; ctx.fill();
@@ -881,8 +1127,8 @@ function resetChart() {
   chart = new Chart($("chart"), {
     type: "line",
     data: { labels: [], datasets: [
-      { label: L("adrenalina", "adrenaline"), data: [], borderColor: "#2f6fb2", borderWidth: 1.2, pointRadius: 0 },
-      { label: L("kortyzol", "cortisol"), data: [], borderColor: "#8a4fbf", borderWidth: 1.2, pointRadius: 0 },
+      { label: L("adrenalina", "adrenaline"), data: [], borderColor: "#0072b2", borderWidth: 1.2, pointRadius: 0 },
+      { label: L("kortyzol", "cortisol"), data: [], borderColor: "#e69f00", borderWidth: 1.2, pointRadius: 0 },
       { label: L("czujność", "vigilance"), data: [], borderColor: ink, borderWidth: 1, pointRadius: 0 },
     ] },
     options: {
@@ -928,11 +1174,19 @@ async function runBatch() {
   const base = readParams();
   const spec = { repeat: rep, seed: seed0 };
   let keys = [];
+  const files = {};
+  let load = null;
   try {
-    if (kind === "files") await loadFiles();
+    if (kind === "files") {
+      const rf = $("roadsFile").files[0], of = $("obsFile").files[0];
+      if (!rf) throw new Error(L("Wskaż plik ścieżek.", "Choose a paths file."));
+      files["/tmp/" + rf.name] = new Uint8Array(await rf.arrayBuffer());
+      if (of) files["/tmp/" + of.name] = new Uint8Array(await of.arrayBuffer());
+      load = ["/tmp/" + rf.name, of ? "/tmp/" + of.name : null];
+    }
     if (kind === "osm") {
       if (!osmJson) throw new Error(L("najpierw pobierz park z OSM", "fetch a park from OSM first"));
-      py.FS.writeFile("/tmp/osm.json", osmJson); py.globals.get("_load")("/tmp/osm.json", null);
+      files["/tmp/osm.json"] = osmJson; load = ["/tmp/osm.json", null];
     }
     if (mode === "planting") {
       spec.distances = parseList($("bDist").value, false); spec.shares = parseList($("bShare").value, false);
@@ -948,40 +1202,36 @@ async function runBatch() {
     else spec.samples = parseInt($("bSamples").value, 10);
   } catch (e) { $("bProgTxt").textContent = L("Błąd: ", "Error: ") + e.message; return; }
   const plan = JSON.parse(py.globals.get("_plan")(mode, JSON.stringify(spec), JSON.stringify(base)));
-  batchStop = false;
-  $("bRun").disabled = true; $("bStop").disabled = false; $("bDl").disabled = true; $("bDlSum").disabled = true;
+  batchConfig = { model: "PSM", model_file: "psm.py", model_version: MODEL_HASH, app: location.origin + location.pathname,
+    saved: new Date().toISOString(), batch: { mode, spec, cycles, runs: plan.length }, park: parkLabel(), params: base };
+  $("bRun").disabled = true; $("bStop").disabled = false; $("bDl").disabled = true; $("bDlSum").disabled = true; $("bDlCfg").disabled = true;
   $("bProg").max = plan.length; $("bProg").value = 0;
-  py.runPython("_BROWS = []; _BSUM = []");
+  $("bTable").replaceChildren(); $("bSummary").replaceChildren(); boxState = null; renderBox();
+  $("bProgTxt").textContent = L(...BG_START);
   const rows = [];
   const t0 = performance.now();
-  let failed = "";
+  let failed = "", out = { stopped: false };
   try {
-  for (let i = 0; i < plan.length && !batchStop; i++) {
-    const [over, seed, label] = plan[i];
-    const params = Object.assign({}, base, over, { end_cycle: cycles });
-    try {
-      py.globals.get("_init")(JSON.stringify(params), String(seed), kind !== "generated");
-    } catch (e) { throw e; }
-    const desc = Object.entries(over).map(([k, v]) => `${k}=${typeof v === "number" ? +v.toFixed(4) : v}`).join(" · ");
-    let done = false;
-    while (!done && !batchStop) {
-      done = py.runPython("_M.run(500); _M.cycle >= _M.p['end_cycle']");
-      $("bProgTxt").textContent = `${L("przebieg", "run")} ${i + 1}/${plan.length} · ${desc || label} · seed ${seed} · ${L("cykl", "cycle")} ${py.runPython("_M.cycle")}`;
-      await tick();
-    }
-    if (batchStop) break;
-    rows.push(JSON.parse(py.globals.get("_row")(i, JSON.stringify(over), label)));
-    $("bProg").value = i + 1;
-    renderBatch(mode, rows, keys, base);
-  }
+    out = await BG.run("_job_batch(_J_plan, _J_base, _J_cyc, _J_load, _J_mode, _J_keys)",
+      { _J_plan: JSON.stringify(plan), _J_base: JSON.stringify(base), _J_cyc: cycles, _J_load: JSON.stringify(load), _J_mode: mode, _J_keys: JSON.stringify(keys) },
+      (ev) => {
+        const [over, seed, label] = plan[ev.i === undefined ? rows.length : ev.i];
+        if (ev.t === "cycle") {
+          const desc = Object.entries(over).map(([k, v]) => `${k}=${typeof v === "number" ? +v.toFixed(4) : v}`).join(" · ");
+          $("bProgTxt").textContent = `${L("przebieg", "run")} ${ev.i + 1}/${plan.length} · ${desc || label} · seed ${seed} · ${L("cykl", "cycle")} ${ev.cycle}`;
+          return;
+        }
+        rows.push(ev.row);
+        batchCsv = ev.csv; batchSumCsv = ev.sum_csv;
+        $("bProg").value = rows.length;
+        renderBatch(mode, rows, keys, ev.summary);
+      }, files);
   } catch (e) { failed = (e.message || String(e)).split("\n").slice(-2).join(" "); }
   const secs = ((performance.now() - t0) / 1000).toFixed(0);
-  $("bProgTxt").textContent = (failed ? L("Błąd: ", "Error: ") + failed : batchStop ? L("Zatrzymano", "Stopped") : L("Gotowe", "Done")) +
+  $("bProgTxt").textContent = (failed ? L("Błąd: ", "Error: ") + failed : out.stopped ? L("Zatrzymano", "Stopped") : L("Gotowe", "Done")) +
     ` · ${rows.length}/${plan.length} ${L("przebiegów", "runs")} · ${secs} s`;
-  batchCsv = py.runPython("psm.dict_rows_csv(_BROWS)");
   $("bRun").disabled = false; $("bStop").disabled = true; $("bDl").disabled = rows.length === 0; $("bDlSum").disabled = rows.length === 0;
-  hasModel = false;
-  await initModel();
+  $("bDlCfg").disabled = rows.length === 0;
 }
 
 function dictTable(rows) {
@@ -1005,14 +1255,45 @@ function dictTable(rows) {
   return t;
 }
 
-function renderBatch(mode, rows, keys, base) {
+function renderBatch(mode, rows, keys, summ) {
   $("bTable").replaceChildren(dictTable(rows));
-  const summ = JSON.parse(py.globals.get("_analyze")(mode, JSON.stringify(keys), JSON.stringify(base)));
   const cap = document.createElement("h3");
   cap.textContent = mode === "oat" ? L("Elastyczności (ΔY/Y) / (ΔX/X)", "Elasticities (ΔY/Y) / (ΔX/X)")
     : mode === "lhs" ? L("Korelacja rang Spearmana parametr–wynik", "Spearman rank correlation parameter–output")
     : L("Średnie i SD w wariantach", "Means and SD per variant");
   $("bSummary").replaceChildren(cap, dictTable(summ));
+  boxState = (mode === "planting" || mode === "sweep") ? { rows, keys } : null;
+  renderBox();
+}
+
+// O: wykres pudełkowy wyniku w wariantach (eksperyment nasadzeń i przegląd parametrów)
+let boxState = null;
+function renderBox() {
+  const box = $("bBox");
+  $("bHeatBox").hidden = true;
+  if (!boxState || !boxState.rows.length) { box.hidden = true; return; }
+  box.hidden = false;
+  const sel = $("bBoxMetric");
+  if (!sel.options.length) {
+    OUTPUTS.forEach((k) => sel.add(new Option(k, k)));
+    sel.value = "total_adrenaline";
+  }
+  const groups = new Map();
+  // w etykiecie tylko parametry, które się zmieniają
+  const vary = boxState.keys.filter((k) => new Set(boxState.rows.map((r) => r[k])).size > 1);
+  boxState.rows.forEach((r) => {
+    const g = vary.map((k) => k + "=" + r[k]).join(", ") || r.label || "–";
+    if (!groups.has(g)) groups.set(g, []);
+    const v = r[sel.value];
+    if (typeof v === "number") groups.get(g).push(v);
+  });
+  UX.boxPlot($("bBoxCanvas"), [...groups].map(([label, values]) => ({ label, values })), sel.value);
+  // S: dwa zmieniane parametry -> mapa ciepła średniej
+  $("bHeatBox").hidden = vary.length !== 2;
+  if (vary.length === 2) {
+    const [kx, ky] = vary;
+    UX.heatFrom($("bHeat"), boxState.rows.map((r) => ({ x: r[kx], y: r[ky], v: r[sel.value] })), kx, ky, L("średnia: ", "mean: ") + sel.value);
+  }
 }
 
 // ---------- testy ----------
@@ -1056,7 +1337,7 @@ $("btnRun").onclick = () => {
 };
 $("btnStep").onclick = () => { if (hasModel) refresh(JSON.parse(py.globals.get("_advance")(1))); };
 $("srcKind").onchange = sourceChanged;
-$("osmPark").onchange = () => { $("osmCustomRow").hidden = $("osmPark").value !== "__custom"; libraryChanged(); };
+$("osmPark").onchange = () => { $("osmCustomRow").hidden = $("osmPark").value !== "__custom"; libraryChanged(); if (PARK_GAL) PARK_GAL.mark($("osmPark").value); };
 $("btnOsm").onclick = fetchOsm;
 $("btnLib").onclick = loadLibraryPark;
 $("btnOsmSave").onclick = () => {
@@ -1070,12 +1351,14 @@ $("dlSummary").onclick = () => download("summary.csv", py.runPython("_M.summary_
 $("dlSeries").onclick = () => download("timeseries.csv", py.runPython("_M.timeseries_csv()"));
 $("dlFear").onclick = () => download("fear_edges.csv", py.runPython("_M.fear_csv()"));
 $("bRun").onclick = runBatch;
-$("bStop").onclick = () => { batchStop = true; };
+$("bStop").onclick = () => BG.stop();
 $("bDl").onclick = () => download("results.csv", batchCsv);
-$("bDlSum").onclick = () => download("summary.csv", py.runPython("psm.dict_rows_csv(_BSUM)"));
+$("bDlSum").onclick = () => download("summary.csv", batchSumCsv);
 $("bMode").onchange = batchModeChanged;
 $("layer").onchange = () => draw();
 $("dlEdges").onclick = () => download("edges.csv", py.runPython("_M.edge_csv()"));
+$("dlConfig").onclick = () => { if (lastConfig) UX.downloadJSON("config.json", Object.assign({}, lastConfig, { cycle_at_download: snap ? snap.cycle : 0, params_changed_during_run: liveChanged })); };
+$("bDlCfg").onclick = () => { if (batchConfig) UX.downloadJSON("config.json", batchConfig); };
 $("btnIso").onclick = async () => {
   $("btnIso").disabled = true;
   $("layerInfo").textContent = L("Liczenie izowist…", "Computing isovists…");
@@ -1090,7 +1373,7 @@ $("btnIso").onclick = async () => {
 };
 $("tRun").onclick = runTests;
 window.addEventListener("resize", () => { if (net) { sizeCanvas(); draw(); } });
-matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => draw());
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { draw(); CMP.redraw(); });
 
 // ---------- język ----------
 let osmInfoSet = false, isoCmp = null, GAP = 25;
@@ -1132,7 +1415,8 @@ function renderOsmInfo() {
 I18N.onChange(() => {
   document.querySelectorAll("#paramForm summary").forEach((el) => { el.textContent = L(el.dataset.pl, I18N_CAT_EN[el.dataset.pl] || el.dataset.pl); });
   document.querySelectorAll("#paramForm label[data-key]").forEach((el) => { el.textContent = L(el.dataset.pl, I18N_PARAM_EN[el.dataset.key] || el.dataset.pl); });
-  runLabel(); renderSpec(); renderNet(); renderStats(); renderLayerInfo(); renderOsmInfo(); sourceChanged();
+  runLabel(); renderSpec(); renderNet(); renderStats(); renderLayerInfo(); renderOsmInfo(); sourceChanged(); renderSetInfo(); renderVersion(); renderRep(); renderBox();
+  sortSelects();
   if (chart) {
     chart.data.datasets[0].label = L("adrenalina", "adrenaline");
     chart.data.datasets[1].label = L("kortyzol", "cortisol");
@@ -1144,7 +1428,544 @@ I18N.onChange(() => {
 renderOsmInfo();
 sourceChanged();
 runLabel();
+sortSelects();
 
+// ---------- wygoda: pliki, podpowiedzi, puste panele, zapamiętane ustawienia ----------
+UX.fileInputs();
+UX.disabledHint(["btnRun", "btnStep", "btnIso", "dlSummary", "dlSeries", "dlFear", "dlEdges"],
+  "Najpierw kliknij Inicjalizuj.", "Click Initialise first.");
+UX.disabledHint("btnOsmSave", "Najpierw wczytaj gotowy park albo pobierz go z OSM.", "Load a ready park or fetch one from OSM first.");
+UX.disabledHint("btnLib", "Gotowe są tylko parki z listy; inną nazwę pobierz z OSM.", "Only the listed parks are ready; fetch other names from OSM.");
+UX.disabledHint(["bDl", "bDlSum"], "Najpierw uruchom eksperyment.", "Run an experiment first.");
+UX.disabledHint("bStop", "Działa w trakcie eksperymentu.", "Active while an experiment runs.");
+UX.emptyNote($("map"), "Kliknij Inicjalizuj, żeby zobaczyć park i agentów.", "Click Initialise to see the park and the agents.");
+UX.emptyNote(document.querySelector(".chart-box"), "Wykres pojawi się po inicjalizacji.", "The chart appears after initialisation.");
+
+let SET = null, setMsg = null;
+function initSettings() {
+  SET = UX.settings("psm-web:ustawienia", ["speed", "seed"], ["#seed"]);
+  const n = SET.count;
+  setMsg = SET.restored === "link" ? [`Wczytano ustawienia z linku (zmienionych pól: ${n}).`, `Settings loaded from the link (${n} changed fields).`]
+    : SET.restored === "local" ? [`Przywrócono ostatnie ustawienia z tej przeglądarki (zmienionych pól: ${n}).`, `Restored your last settings from this browser (${n} changed fields).`]
+    : SET.restored === "badlink" ? ["Link z ustawieniami jest uszkodzony, więc go pominięto.", "The settings link is damaged, so it was ignored."]
+    : null;
+  renderSetInfo();
+  UX.refresh();
+}
+function renderSetInfo() { $("setInfo").textContent = setMsg ? L(setMsg[0], setMsg[1]) : ""; }
+$("btnReset").onclick = () => {
+  if (!SET) return;
+  SET.reset();
+  UX.refresh();
+  setMsg = ["Przywrócono ustawienia startowe. Kliknij Inicjalizuj, żeby ich użyć.", "Default settings restored. Click Initialise to use them."];
+  renderSetInfo();
+};
+$("btnLink").onclick = async () => {
+  if (!SET) return;
+  const ok = await UX.copy(SET.link());
+  setMsg = ok ? ["Skopiowano link z bieżącymi ustawieniami (z seedem).", "Copied a link with the current settings (including the seed)."] : null;
+  renderSetInfo();
+};
+
+// ---------- najważniejsze parametry, suwaki, porównanie, skróty ----------
+const BASIC_KEYS = ["bot_nb", "hall_multiplier", "aversion_strength", "planting", "bush_form", "bush_junction_share",
+  "bush_junction_distance", "end_cycle"];
+const SLIDERS = { bot_nb: [0, 200, 1], hall_multiplier: [1, 6, 0.5], aversion_strength: [0, 20, 0.5],
+  bush_junction_share: [0, 1, 0.05], bush_junction_distance: [0, 30, 1] };
+const CMP = UX.compare($("cmpPanel"), [
+  { key: "total_adrenaline", pl: "Σ adrenaliny phantoma 0", en: "Σ adrenaline of phantom 0" },
+  { key: "fear_events", pl: "epizody lęku", en: "fear episodes" },
+  { key: "feared_edges", pl: "odcinki ze strachem", en: "segments with fear" },
+  { key: "adrenaline", pl: "adrenalina (bieżąca)", en: "adrenaline (current)" },
+  { key: "cortisol", pl: "kortyzol (bieżący)", en: "cortisol (current)" },
+]);
+let runNo = 0, tryLabel = null, lastConfig = null, batchConfig = null, liveChanged = false, MODEL_HASH = "";
+UX.disabledHint("dlConfig", "Najpierw kliknij Inicjalizuj.", "Click Initialise first.");
+UX.disabledHint("bDlCfg", "Najpierw uruchom eksperyment.", "Run an experiment first.");
+UX.shortcuts({
+  Space: () => { if (!$("btnRun").disabled) $("btnRun").click(); },
+  ArrowRight: () => { if (!$("btnStep").disabled) $("btnStep").click(); },
+}, () => !document.querySelector('section[data-panel="sim"]').hidden);
+
+function parkLabel() {
+  const k = $("srcKind").value;
+  return k === "generated" ? "generated (park_seed " + $("p_park_seed").value + ")"
+    : k === "osm" ? osmName || "OSM" : [$("roadsFile").files[0], $("obsFile").files[0]].filter(Boolean).map((f) => f.name).join(" + ");
+}
+// ustawienia przebiegu do config.json (te same, z którymi zainicjalizowano model)
+function simConfig() {
+  return { model: "PSM", model_file: "psm.py", model_version: MODEL_HASH, app: location.origin + location.pathname,
+    saved: new Date().toISOString(), seed: $("seed").value.trim() || null, park: parkLabel(), params: readParams() };
+}
+
+// ---------- Co wypróbować ----------
+const TRY_BASE = { planting: "controlled", bush_junction_share: 1, bush_junction_distance: 0, end_cycle: 10000 };
+const TRY = [
+  { title: ["Krzewy przy skrzyżowaniach: odstęp 0 i 20 m", "Shrubs at junctions: setback 0 and 20 m"],
+    what: ["Ta sama łączna powierzchnia krzewów, wszystkie w narożnikach skrzyżowań. Zmienia się tylko odstęp krzewów od węzła skrzyżowania.",
+           "The same total shrub area, all of it at junction corners. Only the setback of the shrubs from the junction node changes."],
+    look: ["Σ adrenaliny na wykresie porównania i znaczniki strachu na mapie.", "Σ adrenaline on the comparison chart and the fear markers on the map."],
+    expect: ["Przy odstępie 0 m Σ adrenaliny rośnie wielokrotnie szybciej niż przy 20 m. Krzew tuż przy skrzyżowaniu zasłania ludzi do chwili, gdy są już blisko.",
+             "With a 0 m setback, Σ adrenaline grows several times faster than with 20 m. A shrub right at the junction hides people until they are already close."],
+    base: TRY_BASE, variants: [
+      { label: ["odstęp 0 m", "setback 0 m"], params: { bush_junction_distance: 0 } },
+      { label: ["odstęp 20 m", "setback 20 m"], params: { bush_junction_distance: 20 } }] },
+  { title: ["Obłożenie parku: 20 i 80 botów", "Park occupancy: 20 and 80 bots"],
+    what: ["Krzewy w narożnikach skrzyżowań bez odstępu; zmienia się tylko liczba innych spacerowiczów.",
+           "Shrubs at junction corners with no setback; only the number of other walkers changes."],
+    look: ["Σ adrenaliny i liczba epizodów lęku.", "Σ adrenaline and the number of fear episodes."],
+    expect: ["Przy 80 botach Σ adrenaliny jest kilka razy wyższa i pojawiają się epizody lęku. Koszt złego nasadzenia rośnie z obłożeniem, więc warianty warto oceniać przy dużym ruchu.",
+             "With 80 bots, Σ adrenaline is several times higher and fear episodes appear. The cost of poor planting grows with occupancy, so variants are worth assessing at busy times."],
+    base: TRY_BASE, variants: [
+      { label: ["20 botów", "20 bots"], params: { bot_nb: 20 } },
+      { label: ["80 botów", "80 bots"], params: { bot_nb: 80 } }] },
+  { title: ["Mniejsze strefy: mnożnik ×1", "Smaller zones: multiplier ×1"],
+    what: ["Jak w pierwszym eksperymencie (odstęp 0 i 20 m), ale strefy Halla bez powiększenia.",
+           "As in the first experiment (setback 0 and 20 m), but with Hall's zones not enlarged."],
+    look: ["Różnicę między wariantami na wykresie porównania.", "The difference between the variants on the comparison chart."],
+    expect: ["Oba warianty dają prawie ten sam stres: przy małych strefach odsunięcie krzewów od skrzyżowań przestaje mieć znaczenie. Odstęp, od którego krzew przestaje szkodzić, zależy od wielkości stref.",
+             "Both variants give almost the same stress: with small zones, moving shrubs away from junctions no longer matters. The setback at which a shrub stops doing harm depends on the size of the zones."],
+    base: Object.assign({}, TRY_BASE, { hall_multiplier: 1 }), variants: [
+      { label: ["×1, odstęp 0 m", "×1, setback 0 m"], params: { bush_junction_distance: 0 } },
+      { label: ["×1, odstęp 20 m", "×1, setback 20 m"], params: { bush_junction_distance: 20 } }] },
+];
+function setParam(k, v) {
+  const el = $("p_" + k);
+  if (!el) return;
+  if (el.type === "checkbox") el.checked = !!v; else el.value = v === null ? "" : v;
+}
+async function runTry(it, i) {
+  document.querySelector('nav.tabs button[data-tab="sim"]').click();
+  running = false; runLabel();
+  if (i === 0) CMP.clear(); else CMP.keep();
+  Object.keys(DEFAULTS).forEach((k) => setParam(k, DEFAULTS[k]));
+  Object.entries(Object.assign({}, it.base, it.variants[i].params)).forEach(([k, v]) => setParam(k, v));
+  $("srcKind").value = "generated"; sourceChanged();
+  $("seed").value = "1";
+  $("speed").value = 200;
+  UX.refresh();
+  if (SET) SET.save();
+  tryLabel = it.variants[i].label;
+  setMsg = null; renderSetInfo();
+  MOB.show("results");
+  UX.tryBanner($("tryBanner"), it, i, runTry);
+  window.scrollTo({ top: 0, behavior: "smooth" });
+  await initModel();
+  if (hasModel) { running = true; runLabel(); loop(); }
+}
+UX.tryCards($("tryList"), TRY, runTry, runReps);
+
+// ---------- K: oba warianty × 5 seedów, bez animacji ----------
+const REP_METRICS = [
+  { key: "total_adrenaline", pl: "Σ adrenaliny phantoma 0", en: "Σ adrenaline of phantom 0" },
+  { key: "total_cortisol", pl: "Σ kortyzolu", en: "Σ cortisol" },
+  { key: "fear_events", pl: "epizody lęku", en: "fear episodes" },
+  { key: "feared_edges", pl: "odcinki ze strachem", en: "segments with fear" },
+];
+let repLast = null;
+function renderRep() {
+  if (!repLast) return;
+  $("repTitle").textContent = L("Powtórzenia: ", "Replicates: ") + L(repLast.it.title[0], repLast.it.title[1]);
+  UX.repTable($("repTable"), repLast.it.variants.map((v) => v.label), REP_METRICS, repLast.res, repLast.seeds);
+}
+async function runReps(it) {
+  if (!py) return;
+  document.querySelector('nav.tabs button[data-tab="sim"]').click();
+  running = false; runLabel();
+  MOB.show("results");
+  UX.tryBanner($("tryBanner"), null);
+  const seeds = [1, 2, 3, 4, 5], res = it.variants.map(() => []);
+  repLast = { it, seeds, res };
+  $("repPanel").hidden = false; $("repStop").disabled = false; $("repTable").replaceChildren();
+  renderRep();
+  $("repPanel").scrollIntoView({ behavior: "smooth", block: "start" });
+  $("repProg").textContent = L(...BG_START);
+  const t0 = performance.now();
+  let err = "", out = { stopped: false };
+  const runs = [];
+  it.variants.forEach((v, vi) => seeds.forEach((seed) => runs.push({ vi, seed, park: null,
+    params: Object.assign({}, DEFAULTS, it.base, v.params, { park: "generated" }) })));
+  try {
+    out = await BG.run("_job_runs(_J_runs, 0, 1000)", { _J_runs: JSON.stringify(runs) }, (ev) => {
+      const r = runs[ev.k];
+      if (ev.t === "run") { res[r.vi].push(ev.m); renderRep(); return; }
+      $("repProg").textContent = `${L("wariant", "variant")} ${r.vi + 1}/${it.variants.length} · seed ${r.seed} · ${L("cykl", "cycle")} ${ev.cycle} · ${((performance.now() - t0) / 1000).toFixed(0)} s`;
+    });
+  } catch (e) { err = (e.message || String(e)).split("\n").slice(-2).join(" "); }
+  $("repProg").textContent = err ? L("Błąd: ", "Error: ") + err
+    : (out.stopped ? L("Zatrzymano", "Stopped") : L("Gotowe", "Done")) + ` · ${((performance.now() - t0) / 1000).toFixed(0)} s`;
+  $("repStop").disabled = true;
+}
+$("repStop").onclick = () => BG.stop();
+$("repStop").after(UX.linkButton(() => UX.tryLink(TRY.indexOf(repLast.it), "reps"), true));
+UX.disabledHint("repStop", "Działa w trakcie liczenia powtórzeń.", "Active while replicates run.");
+
+// ---------- GAMA: pakiet do GAMA i połączenie z serwerem GAMA ----------
+// Model GAML z ustawieniami strony buduje web/gama_export.py (kopia models/Hall_AC_aversion.gaml z podmienionymi stałymi,
+// park w SHP). Wyniki GAMA (z pliku albo z serwera) strona zestawia z Pythonem: te same ustawienia, park i seedy.
+const G_METRICS = [
+  { key: "total_adrenaline", pl: "Σ adrenaliny", en: "Σ adrenaline" },
+  { key: "total_cortisol", pl: "Σ kortyzolu", en: "Σ cortisol" },
+  { key: "total_vigilance", pl: "Σ czujności", en: "Σ vigilance" },
+];
+const GM = { src: null, gama: [], py: [], info: null, ws: null, stop: false, fileHash: null };
+async function gamaSource() {
+  if (GM.src) return GM.src;
+  let src = null;
+  // GitHub Pages: model obok strony; lokalnie (serwer w katalogu repozytorium): ../models/
+  for (const url of ["Hall_AC_aversion.gaml", "../models/Hall_AC_aversion.gaml"]) {
+    try { const r = await fetch(url, { cache: "no-cache" }); if (r.ok) { src = await r.text(); break; } } catch (e) { /* następny adres */ }
+  }
+  if (!src) throw new Error(L("nie znaleziono pliku Hall_AC_aversion.gaml obok strony", "Hall_AC_aversion.gaml was not found next to the page"));
+  const r = await fetch("gama_export.py", { cache: "no-cache" });
+  if (!r.ok) throw new Error("gama_export.py: HTTP " + r.status);
+  py.FS.writeFile("/home/pyodide/gama_export.py", await r.text());
+  GM.src = src;
+  return src;
+}
+function gamaSeeds() {
+  const out = [];
+  $("gSeeds").value.split(/[,;\s]+/).filter(Boolean).forEach((t) => {
+    const m = /^(\d+)-(\d+)$/.exec(t);
+    if (m) for (let i = +m[1]; i <= +m[2] && out.length < 200; i++) out.push(i);
+    else if (/^\d+$/.test(t)) out.push(+t);
+  });
+  return [...new Set(out)];
+}
+function gamaMode() { return document.querySelector('input[name="gMode"]:checked').value; }
+function gamaModeChanged() {
+  const m = gamaMode();
+  document.querySelectorAll("[data-gmode]").forEach((el) => { el.hidden = el.dataset.gmode !== m; });
+  try { localStorage.setItem("psm-web:gama-mode", m); } catch (e) { /* bez zapamiętywania */ }
+}
+function gamaCycles() {
+  $("gCycles").textContent = L(`Długość przebiegu: ${readParams().end_cycle} cykli (end_cycle z zakładki Symulacja).`,
+    `Run length: ${readParams().end_cycle} cycles (end_cycle from the Simulation tab).`);
+}
+// park bieżącego źródła: w Pyodide strony (do budowy modelu) i jako pliki dla obliczeń Pythona w tle
+async function gamaPark() {
+  const kind = $("srcKind").value, files = {};
+  let park = null, obst = null;
+  if (kind === "osm") {
+    if (!osmJson) throw new Error(L("najpierw wczytaj park", "load a park first"));
+    py.FS.writeFile("/tmp/osm.json", osmJson); py.globals.get("_load")("/tmp/osm.json", null);
+    files["/tmp/osm.json"] = osmJson; park = "/tmp/osm.json";
+  } else if (kind === "files") {
+    await loadFiles();
+    const rf = $("roadsFile").files[0], of = $("obsFile").files[0];
+    files["/tmp/" + rf.name] = new Uint8Array(await rf.arrayBuffer()); park = "/tmp/" + rf.name;
+    if (of) { files["/tmp/" + of.name] = new Uint8Array(await of.arrayBuffer()); obst = "/tmp/" + of.name; }
+  }
+  return { kind, files, park, obst };
+}
+async function gamaBuild(zip) {
+  const src = await gamaSource();
+  const pk = await gamaPark();
+  const seeds = gamaSeeds();
+  if (!seeds.length) throw new Error(L("podaj seedy, np. 1, 2, 3 albo 1-10", "enter seeds, e.g. 1, 2, 3 or 1-10"));
+  const meta = { model: "PSM", model_file: "Hall_AC_aversion.gaml", python_model_version: MODEL_HASH, park: parkLabel(),
+    app: location.origin + location.pathname, saved: new Date().toISOString() };
+  const res = JSON.parse(py.globals.get("_gama_build")(JSON.stringify(readParams()), pk.kind !== "generated", JSON.stringify(seeds),
+    JSON.stringify(meta), src, zip));
+  GM.info = res.info;
+  const by = (w) => res.report.filter((r) => r[2] === w);
+  const changed = by("unknown").map((r) => r[0]);
+  $("gParams").textContent = L(`Model ${res.info.model_file}: ${by("gaml").length} ustawień w kodzie GAML, ${by("shp").length} w geometrii parku (SHP: ${res.info.edges} odcinków, ${res.info.obstacles} przeszkód); izowisty liczy tylko Python i nie wpływają na wynik.`,
+    `Model ${res.info.model_file}: ${by("gaml").length} settings in the GAML code, ${by("shp").length} in the park geometry (SHP: ${res.info.edges} segments, ${res.info.obstacles} obstacles); isovists are computed only in Python and do not affect the result.`) +
+    (changed.length ? L(" Bez odpowiednika w GAML: ", " No GAML counterpart: ") + changed.join(", ") + "." : "");
+  return { pk, seeds, res };
+}
+async function gamaDownload() {
+  $("gProg").textContent = L("Przygotowanie pakietu…", "Preparing the package…");
+  try {
+    const { res } = await gamaBuild(true);
+    const data = py.FS.readFile("/tmp/psm_gama.zip");
+    const url = URL.createObjectURL(new Blob([data], { type: "application/zip" }));
+    const a = document.createElement("a"); a.href = url; a.download = "psm_gama_" + res.info.hash + ".zip";
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    $("gProg").textContent = L(`Pobrano psm_gama_${res.info.hash}.zip. Wyniki zapiszą się w ${res.info.results}.`,
+      `Downloaded psm_gama_${res.info.hash}.zip. The results will be saved in ${res.info.results}.`);
+  } catch (e) { $("gProg").textContent = L("Błąd: ", "Error: ") + (e.message || String(e)).split("\n").slice(-2).join(" "); }
+}
+// wynik GAMA: wiersze { seed, phantom, total_* }; Python liczony w tle z tymi samymi seedami
+async function gamaCompare(rows, label) {
+  GM.gama = rows; GM.py = [];
+  const { pk, res } = await gamaBuild(false);
+  const note = GM.fileHash && GM.fileHash !== res.info.hash
+    ? L(` Uwaga: plik pochodzi z innych ustawień (${GM.fileHash}) niż bieżące (${res.info.hash}); Python liczy bieżące.`,
+        ` Note: the file comes from different settings (${GM.fileHash}) than the current ones (${res.info.hash}); Python uses the current ones.`) : "";
+  const seeds = [...new Set(rows.map((r) => r.seed).filter((s) => s !== null && s !== undefined))].map((s) => Math.round(s));
+  renderGama();
+  const params = Object.assign(readParams(), { park: pk.kind === "generated" ? "generated" : "file" });
+  const runs = (seeds.length ? seeds : gamaSeeds()).map((seed) => ({ seed, park: pk.park, obst: pk.obst, params }));
+  const t0 = performance.now();
+  try {
+    const out = await BG.run("_job_runs(_J_runs, 0, 1000)", { _J_runs: JSON.stringify(runs) }, (ev) => {
+      const r = runs[ev.k];
+      if (ev.t === "run") { ev.ph.forEach((q, i) => GM.py.push({ seed: r.seed, phantom: i, total_adrenaline: q[0], total_cortisol: q[1], total_vigilance: q[2] })); renderGama(); return; }
+      $("gProg").textContent = label + L(" · Python: seed ", " · Python: seed ") + r.seed + " (" + (ev.k + 1) + "/" + runs.length + L(") · cykl ", ") · cycle ") + ev.cycle + " · " + ((performance.now() - t0) / 1000).toFixed(0) + " s";
+    }, pk.files);
+    $("gProg").textContent = label + (out.stopped ? L(" · Python zatrzymany", " · Python stopped") : L(" · Python gotowy", " · Python done")) + note;
+  } catch (e) { $("gProg").textContent = L("Błąd: ", "Error: ") + (e.message || String(e)).split("\n").slice(-2).join(" "); }
+}
+// jeden przebieg = średnia z phantomów
+function gamaRuns(rows) {
+  const by = new Map();
+  rows.forEach((r) => { const k = String(r.seed); if (!by.has(k)) by.set(k, []); by.get(k).push(r); });
+  return [...by].map(([seed, rs]) => Object.assign({ seed: +seed }, ...G_METRICS.map((m) => ({ [m.key]: UX.mean(rs.map((r) => r[m.key])) }))));
+}
+function renderGama() {
+  const g = gamaRuns(GM.gama), p = gamaRuns(GM.py);
+  if (!g.length) { $("gTable").replaceChildren(); $("gBox").hidden = true; $("gSeedTable").replaceChildren(); $("gDl").disabled = true; return; }
+  UX.groupTable($("gTable"), [{ label: "GAMA", recs: g }, { label: "Python", recs: p }], G_METRICS);
+  $("gNote").textContent = p.length ? G_METRICS.map((m) => L(m.pl, m.en) + ": GAMA / Python = " +
+    (UX.mean(g.map((r) => r[m.key])) / UX.mean(p.map((r) => r[m.key]))).toFixed(2)).join(" · ") +
+    L(". Generatory liczb losowych GAMA i Pythona są różne, więc porównuj średnie, nie pojedyncze seedy.",
+      ". GAMA and Python use different random number generators, so compare means, not single seeds.") : "";
+  const sel = $("gMetric");
+  if (!sel.options.length) G_METRICS.forEach((m) => sel.add(new Option(L(m.pl, m.en), m.key)));
+  [...sel.options].forEach((o) => { const m = G_METRICS.find((x) => x.key === o.value); o.textContent = L(m.pl, m.en); });
+  $("gBox").hidden = false;
+  UX.boxPlot($("gCanvas"), [{ label: "GAMA", values: g.map((r) => r[sel.value]) }, { label: "Python", values: p.map((r) => r[sel.value]) }],
+    sel.options[sel.selectedIndex].textContent);
+  const t = document.createElement("table"); t.className = "cmp-table";
+  const h = t.insertRow();
+  ["seed", ...G_METRICS.flatMap((m) => [L(m.pl, m.en) + " GAMA", L(m.pl, m.en) + " Python"])].forEach((x, i) => { const th = document.createElement("th"); th.textContent = x; if (i) th.className = "num"; h.append(th); });
+  const f = (v) => (v === undefined ? "–" : Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(2));
+  g.sort((a, b) => a.seed - b.seed).forEach((r) => {
+    const q = p.find((x) => x.seed === r.seed) || {};
+    const tr = t.insertRow();
+    [String(r.seed), ...G_METRICS.flatMap((m) => [f(r[m.key]), f(q[m.key])])].forEach((v, i) => { const td = tr.insertCell(); td.textContent = v; if (i) td.className = "num mono"; });
+  });
+  $("gSeedTable").replaceChildren(t);
+  $("gDl").disabled = false;
+}
+$("gFile").addEventListener("change", async (ev) => {
+  const f = ev.target.files[0];
+  if (!f || !py) return;
+  try {
+    await gamaSource();
+    const rows = JSON.parse(py.globals.get("_gama_read")(await f.text()));
+    if (!rows.length) throw new Error(L("w pliku nie ma wierszy z wynikami", "the file has no result rows"));
+    const m = /summary_([0-9a-f]{8})\.csv$/.exec(f.name);
+    GM.fileHash = m ? m[1] : null;
+    let i = 0; rows.forEach((r) => { if (r.seed === undefined) r.seed = ++i; });
+    rows.forEach((r, k) => { r.phantom = rows.slice(0, k).filter((x) => x.seed === r.seed).length; });
+    await gamaCompare(rows, L(`GAMA: ${rows.length} wierszy z ${f.name}`, `GAMA: ${rows.length} rows from ${f.name}`));
+  } catch (e) { $("gProg").textContent = L("Błąd: ", "Error: ") + (e.message || String(e)).split("\n").slice(-2).join(" "); }
+});
+// serwer GAMA (gama-headless -socket): load z run_seed, kroki do end_cycle − 1, odczyt sum phantomów
+function gamaConnect(url) {
+  return new Promise((res, rej) => {
+    let ws;
+    try { ws = new WebSocket(url); } catch (e) { rej(e); return; }
+    const q = [];
+    ws.onmessage = (ev) => {
+      let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
+      if (/^Simulation/.test(m.type)) return;
+      if (m.type === "ConnectionSuccessful") { res(api); return; }
+      const w = q.shift(); if (w) w(m);
+    };
+    ws.onerror = () => rej(new Error(L(`brak połączenia z GAMA pod ${url}; uruchom GAMA jako serwer (gama-headless -socket 6868)`,
+      `no connection to GAMA at ${url}; start GAMA as a server (gama-headless -socket 6868)`)));
+    ws.onclose = () => { while (q.length) q.shift()({ type: "Closed", content: L("połączenie zamknięte", "connection closed") }); };
+    const api = {
+      cmd: (o) => new Promise((r) => { q.push(r); ws.send(JSON.stringify(o)); }),
+      close: () => ws.close(),
+    };
+  });
+}
+const gErr = (m) => (typeof m.content === "string" ? m.content : (m.content && m.content.message) || m.type).split("\n").filter(Boolean).pop();
+async function gamaServerRun() {
+  const url = $("gUrl").value.trim(), dir = $("gDir").value.trim();
+  try { localStorage.setItem("psm-web:gama-url", url); localStorage.setItem("psm-web:gama-dir", dir); } catch (e) { /* bez zapamiętywania */ }
+  if (!dir) { $("gProg").textContent = L("Podaj folder z rozpakowanym pakietem.", "Enter the folder with the unpacked package."); return; }
+  GM.stop = false; GM.fileHash = null;
+  $("gRun").disabled = true; $("gStop").disabled = false;
+  const rows = [];
+  const t0 = performance.now();
+  try {
+    const { seeds, res } = await gamaBuild(false);
+    const sep = dir.includes("\\") ? "\\" : "/";
+    const path = dir.replace(/[\\/]+$/, "") + sep + res.info.model_file;
+    const end = readParams().end_cycle;
+    $("gProg").textContent = L("Łączenie z GAMA…", "Connecting to GAMA…");
+    const g = GM.ws = await gamaConnect(url);
+    for (const [k, seed] of seeds.entries()) {
+      if (GM.stop) break;
+      let m = await g.cmd({ type: "load", model: path, experiment: res.info.experiment, console: false, status: false, dialog: false, runtime: true,
+        parameters: [{ type: "float", name: "run_seed", value: seed }] });
+      if (m.type !== "CommandExecutedSuccessfully") {
+        const msg = gErr(m);
+        throw new Error(/not exist|exist|find|FileNotFound|No such/i.test(msg)
+          ? L(`GAMA nie znalazła ${path}. Pobierz pakiet dla bieżących ustawień i rozpakuj go do tego folderu.`, `GAMA could not find ${path}. Download the package for the current settings and unpack it into this folder.`)
+          : msg);
+      }
+      const id = m.content;
+      let c = 0;
+      while (c < end - 1 && !GM.stop) {
+        const n = Math.min(500, end - 1 - c);
+        m = await g.cmd({ type: "step", exp_id: id, nb_step: n, sync: true });
+        if (m.type !== "CommandExecutedSuccessfully") throw new Error(gErr(m));
+        c += n;
+        $("gProg").textContent = `GAMA: seed ${seed} (${k + 1}/${seeds.length}) · ${L("cykl", "cycle")} ${c} · ${((performance.now() - t0) / 1000).toFixed(0)} s`;
+      }
+      if (!GM.stop) {
+        m = await g.cmd({ type: "expression", exp_id: id, expr: "phantom collect [each.total_adrenaline, each.total_cortisol, each.total_vigilance]" });
+        if (m.type !== "CommandExecutedSuccessfully") throw new Error(gErr(m));
+        JSON.parse(m.content).forEach((q, i) => rows.push({ seed, phantom: i, total_adrenaline: q[0], total_cortisol: q[1], total_vigilance: q[2] }));
+        GM.gama = rows.slice(); renderGama();
+      }
+      await g.cmd({ type: "stop", exp_id: id });
+    }
+    g.close();
+  } catch (e) { $("gProg").textContent = L("Błąd: ", "Error: ") + (e.message || String(e)); }
+  GM.ws = null;
+  $("gRun").disabled = false; $("gStop").disabled = true;
+  if (rows.length) await gamaCompare(rows, L(`GAMA: ${new Set(rows.map((r) => r.seed)).size} przebiegów z serwera`, `GAMA: ${new Set(rows.map((r) => r.seed)).size} runs from the server`) + (GM.stop ? L(" (zatrzymano)", " (stopped)") : ""));
+}
+document.querySelectorAll('input[name="gMode"]').forEach((r) => r.addEventListener("change", gamaModeChanged));
+try {
+  const m = localStorage.getItem("psm-web:gama-mode");
+  if (m) document.querySelector(`input[name="gMode"][value="${m}"]`).checked = true;
+  $("gUrl").value = localStorage.getItem("psm-web:gama-url") || $("gUrl").value;
+  $("gDir").value = localStorage.getItem("psm-web:gama-dir") || "";
+} catch (e) { /* bez zapamiętywania */ }
+gamaModeChanged();
+$("gPkg").onclick = gamaDownload;
+$("gPkg2").onclick = gamaDownload;
+$("gRun").onclick = gamaServerRun;
+$("gStop").onclick = () => { GM.stop = true; BG.stop(); };
+$("gMetric").onchange = renderGama;
+$("gDl").onclick = () => {
+  const keys = ["impl", "seed", "phantom", ...G_METRICS.map((m) => m.key)];
+  const rows = [...GM.gama.map((r) => Object.assign({ impl: "gama" }, r)), ...GM.py.map((r) => Object.assign({ impl: "python" }, r))];
+  download("gama_python.csv", [keys.join(","), ...rows.map((r) => keys.map((k) => r[k]).join(","))].join("\n") + "\n");
+};
+document.querySelector('nav.tabs button[data-tab="gama"]').addEventListener("click", gamaCycles);
+UX.disabledHint("gStop", "Działa w trakcie liczenia w GAMA.", "Active while GAMA is computing.");
+UX.disabledHint("gDl", "Najpierw wczytaj albo policz wyniki GAMA.", "Load or compute GAMA results first.");
+I18N.onChange(() => { renderGama(); gamaCycles(); });
+
+// ---------- V: wszystkie parki z biblioteki ----------
+let parksRes = null;
+function parkGroups() {
+  const names = [...new Set(parksRes.runs.map((r) => r.name))].sort((a, b) => a.localeCompare(b, "pl"));
+  return names.map((name) => ({ label: name, N: parksRes.runs.find((r) => r.name === name).params.bot_nb, recs: parksRes.res.filter((r) => r.park === name) }));
+}
+function renderParks() {
+  if (!parksRes) return;
+  const groups = parkGroups();
+  UX.groupTable($("vTable"), groups, REP_METRICS, [{ pl: "botów", en: "bots", get: (g) => String(g.N) }]);
+  $("vBox").hidden = !parksRes.res.length;
+  if ($("vBox").hidden) return;
+  const sel = $("vMetric");
+  if (!sel.options.length) REP_METRICS.forEach((m) => sel.add(new Option(L(m.pl, m.en), m.key)));
+  [...sel.options].forEach((o) => { const m = REP_METRICS.find((x) => x.key === o.value); o.textContent = L(m.pl, m.en); });
+  UX.boxPlot($("vCanvas"), groups.map((g) => ({ label: g.label.replace(/^Park /, ""), values: g.recs.map((r) => r[sel.value]) })),
+    sel.options[sel.selectedIndex].textContent);
+}
+async function runParks() {
+  if (!py) return;
+  const cyc = Math.max(1, parseInt($("vCycles").value, 10) || 10000);
+  const ns = Math.min(30, Math.max(1, parseInt($("vSeeds").value, 10) || 1));
+  const dens = $("vN").value === "density";
+  const base = Object.assign(readParams(), { park: "file" });
+  $("vRun").disabled = true; $("vStop").disabled = false; $("vDl").disabled = true;
+  $("vProg").textContent = L(...BG_START);
+  const t0 = performance.now();
+  let err = "", out = { stopped: false };
+  try {
+    const lib = await parkLibrary(), files = {}, runs = [];
+    for (const [i, p] of lib.entries()) {
+      const r = await fetch("parki/" + p.file, { cache: "no-cache" });
+      if (!r.ok) throw new Error(p.file + ": HTTP " + r.status);
+      files["/tmp/park_" + i + ".json"] = await r.text();
+      for (let seed = 1; seed <= ns; seed++) runs.push({ name: p.name, seed, park: "/tmp/park_" + i + ".json",
+        params: Object.assign({}, base, dens ? { bot_nb: Math.max(1, Math.round(20 * p.length_m / 1000)) } : {}) });
+    }
+    parksRes = { runs, res: [], dens, cyc, base };
+    renderParks();
+    out = await BG.run("_job_runs(_J_runs, _J_cyc, 1000)", { _J_runs: JSON.stringify(runs), _J_cyc: cyc }, (ev) => {
+      const r = runs[ev.k];
+      if (ev.t === "run") { parksRes.res.push(Object.assign({ park: r.name, seed: r.seed, bot_nb: r.params.bot_nb }, ev.m)); renderParks(); return; }
+      $("vProg").textContent = `${parksRes.res.length + 1}/${runs.length} · ${r.name} · seed ${r.seed} · ${L("cykl", "cycle")} ${ev.cycle} · ${((performance.now() - t0) / 1000).toFixed(0)} s`;
+    }, files);
+  } catch (e) { err = (e.message || String(e)).split("\n").slice(-2).join(" "); }
+  $("vProg").textContent = err ? L("Błąd: ", "Error: ") + err
+    : (out.stopped ? L("Zatrzymano", "Stopped") : L("Gotowe", "Done")) + ` · ${parksRes ? parksRes.res.length : 0} ${L("przebiegów", "runs")} · ${((performance.now() - t0) / 1000).toFixed(0)} s`;
+  $("vRun").disabled = false; $("vStop").disabled = true; $("vDl").disabled = !(parksRes && parksRes.res.length);
+}
+$("vRun").onclick = runParks;
+$("vStop").onclick = () => BG.stop();
+$("vMetric").onchange = renderParks;
+$("vDl").onclick = () => {
+  const keys = ["park", "seed", "bot_nb", ...REP_METRICS.map((m) => m.key)];
+  const q = (v) => (typeof v === "string" && /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v);
+  download("parks.csv", [keys.join(","), ...parksRes.res.map((r) => keys.map((k) => q(r[k])).join(","))].join("\n") + "\n");
+};
+UX.disabledHint("vStop", "Działa w trakcie porównania parków.", "Active while the parks are compared.");
+UX.disabledHint("vDl", "Najpierw porównaj parki.", "Compare the parks first.");
+I18N.onChange(renderParks);
+
+// ---------- I, L, H, N: PNG, widok na telefon, samouczek, galeria parków ----------
+UX.a11y({ main: $("main"), tabs: document.querySelector("nav.tabs"), live: [$("messages")], labels: [
+  [document.querySelector("aside.params"), "Ustawienia", "Settings"],
+  [$("map"), "Mapa parku: ścieżki w kolorze wybranej warstwy, krzewy, boty i phantom ze strefami.",
+    "Park map: paths coloured by the chosen layer, shrubs, bots and the phantom with its zones."],
+  [$("bBoxCanvas"), "Wykres pudełkowy wybranego wyniku w wariantach", "Box plot of the chosen output per variant"],
+  [$("bHeat"), "Mapa ciepła średniej wybranego wyniku dla dwóch parametrów", "Heat map of the mean of the chosen output for two parameters"],
+  [$("vCanvas"), "Wykres pudełkowy wybranego wyniku w parkach", "Box plot of the chosen output per park"],
+  [$("gCanvas"), "Wykres pudełkowy wyniku w GAMA i w Pythonie", "Box plot of the output in GAMA and in Python"],
+] });
+[$("map"), $("bBoxCanvas"), $("bHeat"), $("vCanvas"), $("gCanvas")].forEach((c) => c.setAttribute("role", "img"));
+UX.pngButtons([...document.querySelectorAll('section[data-panel="sim"] figure.display'), $("cmpPanel"), $("bBox"), $("bHeatBox"), $("vBox"), $("gBox")]);
+const MOB = UX.mobileTabs(document.querySelector('section[data-panel="sim"]'));
+$("bBoxMetric").onchange = renderBox;
+function startTour(force) {
+  document.querySelector('nav.tabs button[data-tab="sim"]').click();
+  MOB.show("params");
+  UX.tour("psm-web:samouczek", [
+    { el: () => document.querySelector(".source"), text: ["Tu wybierasz park: generowany, gotowy z biblioteki (OpenStreetMap, Wrocław) albo własne pliki.", "Choose the park here: generated, a ready one from the library (OpenStreetMap, Wrocław) or your own files."] },
+    { el: () => document.querySelector(".cat.basic"), text: ["Najważniejsze parametry. Najedź na nazwę albo kliknij „?”, żeby zobaczyć opis. Resztę pokazuje przycisk pod spodem.", "The key parameters. Hover over a name or click “?” to see its description. The button below shows the rest."] },
+    { el: () => $("btnInit"), text: ["Inicjalizuj buduje park i agentów. Potem Start (spacja) albo Krok (→).", "Initialise builds the park and the agents. Then Run (space) or Step (→)."] },
+    { el: () => { MOB.show("results"); return $("map"); }, text: ["Mapa: ścieżki, krzewy, boty i phantom ze strefami. Kolor ścieżek objaśnia skala pod mapą.", "The map: paths, shrubs, bots and the phantom with its zones. The scale below the map explains the path colours."] },
+    { el: () => $("cmpPanel"), text: ["Porównanie: zapamiętaj przebieg, zmień ustawienia i uruchom ponownie, żeby zobaczyć oba na jednym wykresie.", "Comparison: keep a run, change the settings and run again to see both on one chart."] },
+    { el: () => document.querySelector('nav.tabs button[data-tab="about"]'), text: ["W zakładce O modelu jest opis i gotowe eksperymenty „Co wypróbować”, uruchamiane jednym kliknięciem.", "The About tab has the description and ready experiments under “Things to try”, run with one click."] },
+  ], force);
+}
+$("btnTour").onclick = () => startTour(true);
+let PARK_GAL = null;
+parkLibrary().then((lib) => {
+  PARK_GAL = UX.gallery($("parkGallery"), lib, "parki/mini/", (name) => {
+    $("osmPark").value = name; $("osmCustomRow").hidden = true; libraryChanged();
+    PARK_GAL.mark(name);
+    loadLibraryPark();
+  });
+}).catch(() => { $("parkGallery").hidden = true; });
+
+// ---------- jak cytować i wersja modelu ----------
+const CITE = "Dziedzic, S., Szurlej, M., Kamiński, M., & Szarejko, M. (2026). PSM: Proxemic Stress Model with route aversion " +
+  "(GAMA model, Python port and browser app) [Software]. https://github.com/SzymonDziedzic98/psm-web";
+function bibtex() {
+  return "@software{psm_web,\n  author = {Dziedzic, Szymon and Szurlej, Mikołaj and Kamiński, Maciej and Szarejko, Maciej},\n" +
+    "  title = {{PSM}: Proxemic Stress Model with route aversion ({GAMA} model, Python port and browser app)},\n" +
+    "  year = {2026},\n  url = {https://github.com/SzymonDziedzic98/psm-web},\n" +
+    "  note = {Model file psm.py" + (MODEL_HASH ? ", " + MODEL_HASH : "") + "}\n}";
+}
+function renderVersion() {
+  $("citeText").textContent = CITE;
+  $("modelVer").textContent = MODEL_HASH
+    ? L(`Wersja modelu: psm.py, ${MODEL_HASH} (skrót pliku wczytanego przez tę stronę; ten sam skrót trafia do config.json).`,
+        `Model version: psm.py, ${MODEL_HASH} (hash of the file loaded by this page; the same hash goes into config.json).`)
+    : "";
+}
+$("btnCite").onclick = () => UX.copy(CITE);
+$("btnBib").onclick = () => UX.copy(bibtex());
+renderVersion();
+
+UX.offline($("offlineNote"));
 boot();
 </script>
 </body>

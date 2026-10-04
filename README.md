@@ -40,6 +40,9 @@ Symulacja zatrzymuje się po 10 000 cyklach; w cyklu 9999 wyniki są dopisywane 
   Otwórz przez serwer HTTP uruchomiony w głównym katalogu repozytorium: `python -m http.server`, potem `http://localhost:8000/web/` (strona wczytuje `../src/psm.py`).
   Interfejs jest po polsku i po angielsku: przełącznik PL/EN w nagłówku, wybór zapamiętuje przeglądarka;
   `?lang=en` albo `?lang=pl` w adresie wymusza język. Teksty angielskie są w `web/i18n.js`.
+  Powtórzenia, batch i „Wszystkie parki z biblioteki” liczą się w tle (`web/bg.js`, osobny Pyodide w Web Workerze), więc strona
+  nie przestaje reagować; `web/sw.js` zapisuje stronę i Pyodide w przeglądarce, więc kolejne otwarcie jest szybsze i działa bez internetu.
+  `?try=2.1` otwiera stronę od razu na wariancie 1 drugiego eksperymentu z „Co wypróbować”, `?try=2.reps` liczy oba warianty × 5 seedów.
   Workflow `.github/workflows/pages.yml` publikuje `web/` razem z `src/psm.py` na GitHub Pages
   (jednorazowo: Settings → Pages → Source: „GitHub Actions”).
 
