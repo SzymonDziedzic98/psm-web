@@ -102,6 +102,9 @@ details.cat > summary {
 .field input[type="file"] { max-width: 100%; font-size: 12px; }
 .field.restart label::after { content: " ↻"; color: var(--accent); }
 .hint { font-size: 12px; color: var(--muted); margin: 0; }
+label.radio { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
+ol.steps { padding-left: 20px; display: grid; gap: 4px; }
+ol.steps code { overflow-wrap: anywhere; }
 .source { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: grid; gap: 8px; }
 
 .results { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
@@ -172,6 +175,7 @@ code { font-family: var(--font-mono); font-size: 12.5px; }
 <nav class="tabs" role="tablist">
   <button role="tab" aria-selected="true" data-tab="sim">Symulacja</button>
   <button role="tab" aria-selected="false" data-tab="batch">Eksperyment batch</button>
+  <button role="tab" aria-selected="false" data-tab="gama">GAMA</button>
   <button role="tab" aria-selected="false" data-tab="tests">Testy</button>
   <button role="tab" aria-selected="false" data-tab="about">O modelu</button>
 </nav>
@@ -369,6 +373,60 @@ code { font-family: var(--font-mono); font-size: 12.5px; }
   </div>
 </section>
 
+<!-- GAMA -->
+<section data-panel="gama" hidden>
+  <div class="panel">
+    <h2>Obliczenia w GAMA</h2>
+    <p class="hint">GAMA nie działa w przeglądarce. Strona przygotowuje model GAML z ustawieniami i parkiem z zakładki Symulacja, a wyniki z GAMA pokazuje obok Pythona z tymi samymi ustawieniami i seedami.</p>
+    <div class="controls" role="radiogroup" aria-label="Sposób liczenia w GAMA">
+      <label class="radio"><input type="radio" name="gMode" value="pkg" checked> Pakiet: GAMA uruchamiasz sam</label>
+      <label class="radio"><input type="radio" name="gMode" value="server"> Połączenie z GAMA na tym komputerze</label>
+    </div>
+    <div class="controls">
+      <div class="field wide"><label for="gSeeds">Seedy</label><input type="text" id="gSeeds" value="1, 2, 3, 4, 5"></div>
+    </div>
+    <p class="hint" id="gCycles" data-noi18n></p>
+    <div data-gmode="pkg">
+      <ol class="hint steps">
+        <li>Pobierz pakiet: model GAML z bieżącymi ustawieniami, park w plikach SHP i skrypty uruchomienia.</li>
+        <li>Rozpakuj go i uruchom <code>bash run_gama.sh /ścieżka/do/GAMA</code> (Windows: <code>run_gama.bat C:\ścieżka\do\GAMA</code>) albo otwórz model w oknie GAMA (opis w README.txt).</li>
+        <li>Wczytaj tu plik <code>results/summary_….csv</code>.</li>
+      </ol>
+      <div class="controls">
+        <button class="btn primary" id="gPkg">Pobierz pakiet (ZIP)</button>
+      </div>
+      <div class="field stack"><label for="gFile">Wyniki z GAMA (summary_….csv)</label><input type="file" id="gFile" accept=".csv"></div>
+    </div>
+    <div data-gmode="server" hidden>
+      <ol class="hint steps">
+        <li>Pobierz pakiet i rozpakuj go do jednego folderu (kolejne pakiety do tego samego).</li>
+        <li>Uruchom GAMA jako serwer: <code>gama-headless.sh -socket 6868</code> w katalogu <code>headless</code> GAMA (Windows: <code>gama-headless.bat -socket 6868</code>).</li>
+        <li>Podaj pełną ścieżkę folderu z pakietem i kliknij „Licz w GAMA”. Przeglądarka może zapytać o zgodę na połączenie z tym komputerem.</li>
+      </ol>
+      <div class="controls">
+        <div class="field wide"><label for="gUrl">Adres serwera GAMA</label><input type="text" id="gUrl" value="ws://localhost:6868" data-noi18n></div>
+        <div class="field wide"><label for="gDir">Folder z pakietem</label><input type="text" id="gDir" placeholder="np. /home/ja/psm_gama"></div>
+      </div>
+      <div class="controls">
+        <button class="btn" id="gPkg2">Pobierz pakiet (ZIP)</button>
+        <button class="btn primary" id="gRun">Licz w GAMA</button>
+        <button class="btn" id="gStop" disabled>Zatrzymaj</button>
+      </div>
+    </div>
+    <p class="hint mono" id="gProg" data-noi18n>—</p>
+    <p class="hint" id="gParams" data-noi18n></p>
+    <div class="table-wrap" id="gTable" data-noi18n></div>
+    <p class="hint" id="gNote" data-noi18n></p>
+    <div class="box-plot" id="gBox" hidden>
+      <h2>GAMA i Python</h2>
+      <div class="controls"><select id="gMetric" aria-label="Wynik na wykresie" data-nosort></select></div>
+      <canvas id="gCanvas"></canvas>
+    </div>
+    <div class="table-wrap" id="gSeedTable" data-noi18n></div>
+    <div class="controls"><button class="btn" id="gDl" disabled>gama_python.csv</button></div>
+  </div>
+</section>
+
 <!-- TESTY -->
 <section data-panel="tests" hidden>
   <div class="panel">
@@ -554,15 +612,34 @@ def _job_runs(runs_json, cycles, chunk):
     runs, cur = json.loads(runs_json), None
     for k, r in enumerate(runs):
         park = r.get("park")
-        if park and park != cur:
-            _load(park, None)
-            cur = park
+        if park and (park, r.get("obst")) != cur:
+            _load(park, r.get("obst"))
+            cur = (park, r.get("obst"))
         params = dict(r["params"])
         if cycles:
             params["end_cycle"] = int(cycles)
         m = _new(params, str(r["seed"]), bool(park))
         yield from _run_to_end(m, chunk, {"t": "cycle", "k": k})
-        yield json.dumps({"t": "run", "k": k, "m": _clean(m.metrics())})
+        ph = [[q.total_adrenaline, q.total_cortisol, q.total_vigilance] for q in m.phantoms]
+        yield json.dumps({"t": "run", "k": k, "m": _clean(m.metrics()), "ph": _clean(ph)})
+
+# zakładka GAMA: kopia modelu GAML z ustawieniami strony i geometrią parku (web/gama_export.py)
+def _gama_build(params_json, use_inputs, seeds_json, meta_json, gaml_src, want_zip):
+    import gama_export
+    p = dict(psm.DEFAULTS)
+    p.update(json.loads(params_json))
+    m = _new(p, "1", use_inputs)
+    if want_zip:
+        z, rep, info = gama_export.package(m, p, gaml_src, json.loads(seeds_json), json.loads(meta_json))
+        with open("/tmp/psm_gama.zip", "wb") as f:
+            f.write(z)
+    else:
+        _files, rep, info = gama_export.build(m, p, gaml_src)
+    return json.dumps(_clean({"report": rep, "info": info}))
+
+def _gama_read(text):
+    import gama_export
+    return json.dumps(gama_export.read_summary(text))
 
 def _iso():
     c = _M.isovist_comparison()
@@ -1523,6 +1600,254 @@ $("repStop").onclick = () => BG.stop();
 $("repStop").after(UX.linkButton(() => UX.tryLink(TRY.indexOf(repLast.it), "reps"), true));
 UX.disabledHint("repStop", "Działa w trakcie liczenia powtórzeń.", "Active while replicates run.");
 
+// ---------- GAMA: pakiet do GAMA i połączenie z serwerem GAMA ----------
+// Model GAML z ustawieniami strony buduje web/gama_export.py (kopia models/Hall_AC_aversion.gaml z podmienionymi stałymi,
+// park w SHP). Wyniki GAMA (z pliku albo z serwera) strona zestawia z Pythonem: te same ustawienia, park i seedy.
+const G_METRICS = [
+  { key: "total_adrenaline", pl: "Σ adrenaliny", en: "Σ adrenaline" },
+  { key: "total_cortisol", pl: "Σ kortyzolu", en: "Σ cortisol" },
+  { key: "total_vigilance", pl: "Σ czujności", en: "Σ vigilance" },
+];
+const GM = { src: null, gama: [], py: [], info: null, ws: null, stop: false, fileHash: null };
+async function gamaSource() {
+  if (GM.src) return GM.src;
+  let src = null;
+  // GitHub Pages: model obok strony; lokalnie (serwer w katalogu repozytorium): ../models/
+  for (const url of ["Hall_AC_aversion.gaml", "../models/Hall_AC_aversion.gaml"]) {
+    try { const r = await fetch(url, { cache: "no-cache" }); if (r.ok) { src = await r.text(); break; } } catch (e) { /* następny adres */ }
+  }
+  if (!src) throw new Error(L("nie znaleziono pliku Hall_AC_aversion.gaml obok strony", "Hall_AC_aversion.gaml was not found next to the page"));
+  const r = await fetch("gama_export.py", { cache: "no-cache" });
+  if (!r.ok) throw new Error("gama_export.py: HTTP " + r.status);
+  py.FS.writeFile("/home/pyodide/gama_export.py", await r.text());
+  GM.src = src;
+  return src;
+}
+function gamaSeeds() {
+  const out = [];
+  $("gSeeds").value.split(/[,;\s]+/).filter(Boolean).forEach((t) => {
+    const m = /^(\d+)-(\d+)$/.exec(t);
+    if (m) for (let i = +m[1]; i <= +m[2] && out.length < 200; i++) out.push(i);
+    else if (/^\d+$/.test(t)) out.push(+t);
+  });
+  return [...new Set(out)];
+}
+function gamaMode() { return document.querySelector('input[name="gMode"]:checked').value; }
+function gamaModeChanged() {
+  const m = gamaMode();
+  document.querySelectorAll("[data-gmode]").forEach((el) => { el.hidden = el.dataset.gmode !== m; });
+  try { localStorage.setItem("psm-web:gama-mode", m); } catch (e) { /* bez zapamiętywania */ }
+}
+function gamaCycles() {
+  $("gCycles").textContent = L(`Długość przebiegu: ${readParams().end_cycle} cykli (end_cycle z zakładki Symulacja).`,
+    `Run length: ${readParams().end_cycle} cycles (end_cycle from the Simulation tab).`);
+}
+// park bieżącego źródła: w Pyodide strony (do budowy modelu) i jako pliki dla obliczeń Pythona w tle
+async function gamaPark() {
+  const kind = $("srcKind").value, files = {};
+  let park = null, obst = null;
+  if (kind === "osm") {
+    if (!osmJson) throw new Error(L("najpierw wczytaj park", "load a park first"));
+    py.FS.writeFile("/tmp/osm.json", osmJson); py.globals.get("_load")("/tmp/osm.json", null);
+    files["/tmp/osm.json"] = osmJson; park = "/tmp/osm.json";
+  } else if (kind === "files") {
+    await loadFiles();
+    const rf = $("roadsFile").files[0], of = $("obsFile").files[0];
+    files["/tmp/" + rf.name] = new Uint8Array(await rf.arrayBuffer()); park = "/tmp/" + rf.name;
+    if (of) { files["/tmp/" + of.name] = new Uint8Array(await of.arrayBuffer()); obst = "/tmp/" + of.name; }
+  }
+  return { kind, files, park, obst };
+}
+async function gamaBuild(zip) {
+  const src = await gamaSource();
+  const pk = await gamaPark();
+  const seeds = gamaSeeds();
+  if (!seeds.length) throw new Error(L("podaj seedy, np. 1, 2, 3 albo 1-10", "enter seeds, e.g. 1, 2, 3 or 1-10"));
+  const meta = { model: "PSM", model_file: "Hall_AC_aversion.gaml", python_model_version: MODEL_HASH, park: parkLabel(),
+    app: location.origin + location.pathname, saved: new Date().toISOString() };
+  const res = JSON.parse(py.globals.get("_gama_build")(JSON.stringify(readParams()), pk.kind !== "generated", JSON.stringify(seeds),
+    JSON.stringify(meta), src, zip));
+  GM.info = res.info;
+  const by = (w) => res.report.filter((r) => r[2] === w);
+  const changed = by("unknown").map((r) => r[0]);
+  $("gParams").textContent = L(`Model ${res.info.model_file}: ${by("gaml").length} ustawień w kodzie GAML, ${by("shp").length} w geometrii parku (SHP: ${res.info.edges} odcinków, ${res.info.obstacles} przeszkód); izowisty liczy tylko Python i nie wpływają na wynik.`,
+    `Model ${res.info.model_file}: ${by("gaml").length} settings in the GAML code, ${by("shp").length} in the park geometry (SHP: ${res.info.edges} segments, ${res.info.obstacles} obstacles); isovists are computed only in Python and do not affect the result.`) +
+    (changed.length ? L(" Bez odpowiednika w GAML: ", " No GAML counterpart: ") + changed.join(", ") + "." : "");
+  return { pk, seeds, res };
+}
+async function gamaDownload() {
+  $("gProg").textContent = L("Przygotowanie pakietu…", "Preparing the package…");
+  try {
+    const { res } = await gamaBuild(true);
+    const data = py.FS.readFile("/tmp/psm_gama.zip");
+    const url = URL.createObjectURL(new Blob([data], { type: "application/zip" }));
+    const a = document.createElement("a"); a.href = url; a.download = "psm_gama_" + res.info.hash + ".zip";
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    $("gProg").textContent = L(`Pobrano psm_gama_${res.info.hash}.zip. Wyniki zapiszą się w ${res.info.results}.`,
+      `Downloaded psm_gama_${res.info.hash}.zip. The results will be saved in ${res.info.results}.`);
+  } catch (e) { $("gProg").textContent = L("Błąd: ", "Error: ") + (e.message || String(e)).split("\n").slice(-2).join(" "); }
+}
+// wynik GAMA: wiersze { seed, phantom, total_* }; Python liczony w tle z tymi samymi seedami
+async function gamaCompare(rows, label) {
+  GM.gama = rows; GM.py = [];
+  const { pk, res } = await gamaBuild(false);
+  const note = GM.fileHash && GM.fileHash !== res.info.hash
+    ? L(` Uwaga: plik pochodzi z innych ustawień (${GM.fileHash}) niż bieżące (${res.info.hash}); Python liczy bieżące.`,
+        ` Note: the file comes from different settings (${GM.fileHash}) than the current ones (${res.info.hash}); Python uses the current ones.`) : "";
+  const seeds = [...new Set(rows.map((r) => r.seed).filter((s) => s !== null && s !== undefined))].map((s) => Math.round(s));
+  renderGama();
+  const params = Object.assign(readParams(), { park: pk.kind === "generated" ? "generated" : "file" });
+  const runs = (seeds.length ? seeds : gamaSeeds()).map((seed) => ({ seed, park: pk.park, obst: pk.obst, params }));
+  const t0 = performance.now();
+  try {
+    const out = await BG.run("_job_runs(_J_runs, 0, 1000)", { _J_runs: JSON.stringify(runs) }, (ev) => {
+      const r = runs[ev.k];
+      if (ev.t === "run") { ev.ph.forEach((q, i) => GM.py.push({ seed: r.seed, phantom: i, total_adrenaline: q[0], total_cortisol: q[1], total_vigilance: q[2] })); renderGama(); return; }
+      $("gProg").textContent = label + L(" · Python: seed ", " · Python: seed ") + r.seed + " (" + (ev.k + 1) + "/" + runs.length + L(") · cykl ", ") · cycle ") + ev.cycle + " · " + ((performance.now() - t0) / 1000).toFixed(0) + " s";
+    }, pk.files);
+    $("gProg").textContent = label + (out.stopped ? L(" · Python zatrzymany", " · Python stopped") : L(" · Python gotowy", " · Python done")) + note;
+  } catch (e) { $("gProg").textContent = L("Błąd: ", "Error: ") + (e.message || String(e)).split("\n").slice(-2).join(" "); }
+}
+// jeden przebieg = średnia z phantomów
+function gamaRuns(rows) {
+  const by = new Map();
+  rows.forEach((r) => { const k = String(r.seed); if (!by.has(k)) by.set(k, []); by.get(k).push(r); });
+  return [...by].map(([seed, rs]) => Object.assign({ seed: +seed }, ...G_METRICS.map((m) => ({ [m.key]: UX.mean(rs.map((r) => r[m.key])) }))));
+}
+function renderGama() {
+  const g = gamaRuns(GM.gama), p = gamaRuns(GM.py);
+  if (!g.length) { $("gTable").replaceChildren(); $("gBox").hidden = true; $("gSeedTable").replaceChildren(); $("gDl").disabled = true; return; }
+  UX.groupTable($("gTable"), [{ label: "GAMA", recs: g }, { label: "Python", recs: p }], G_METRICS);
+  $("gNote").textContent = p.length ? G_METRICS.map((m) => L(m.pl, m.en) + ": GAMA / Python = " +
+    (UX.mean(g.map((r) => r[m.key])) / UX.mean(p.map((r) => r[m.key]))).toFixed(2)).join(" · ") +
+    L(". Generatory liczb losowych GAMA i Pythona są różne, więc porównuj średnie, nie pojedyncze seedy.",
+      ". GAMA and Python use different random number generators, so compare means, not single seeds.") : "";
+  const sel = $("gMetric");
+  if (!sel.options.length) G_METRICS.forEach((m) => sel.add(new Option(L(m.pl, m.en), m.key)));
+  [...sel.options].forEach((o) => { const m = G_METRICS.find((x) => x.key === o.value); o.textContent = L(m.pl, m.en); });
+  $("gBox").hidden = false;
+  UX.boxPlot($("gCanvas"), [{ label: "GAMA", values: g.map((r) => r[sel.value]) }, { label: "Python", values: p.map((r) => r[sel.value]) }],
+    sel.options[sel.selectedIndex].textContent);
+  const t = document.createElement("table"); t.className = "cmp-table";
+  const h = t.insertRow();
+  ["seed", ...G_METRICS.flatMap((m) => [L(m.pl, m.en) + " GAMA", L(m.pl, m.en) + " Python"])].forEach((x, i) => { const th = document.createElement("th"); th.textContent = x; if (i) th.className = "num"; h.append(th); });
+  const f = (v) => (v === undefined ? "–" : Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(2));
+  g.sort((a, b) => a.seed - b.seed).forEach((r) => {
+    const q = p.find((x) => x.seed === r.seed) || {};
+    const tr = t.insertRow();
+    [String(r.seed), ...G_METRICS.flatMap((m) => [f(r[m.key]), f(q[m.key])])].forEach((v, i) => { const td = tr.insertCell(); td.textContent = v; if (i) td.className = "num mono"; });
+  });
+  $("gSeedTable").replaceChildren(t);
+  $("gDl").disabled = false;
+}
+$("gFile").addEventListener("change", async (ev) => {
+  const f = ev.target.files[0];
+  if (!f || !py) return;
+  try {
+    await gamaSource();
+    const rows = JSON.parse(py.globals.get("_gama_read")(await f.text()));
+    if (!rows.length) throw new Error(L("w pliku nie ma wierszy z wynikami", "the file has no result rows"));
+    const m = /summary_([0-9a-f]{8})\.csv$/.exec(f.name);
+    GM.fileHash = m ? m[1] : null;
+    let i = 0; rows.forEach((r) => { if (r.seed === undefined) r.seed = ++i; });
+    rows.forEach((r, k) => { r.phantom = rows.slice(0, k).filter((x) => x.seed === r.seed).length; });
+    await gamaCompare(rows, L(`GAMA: ${rows.length} wierszy z ${f.name}`, `GAMA: ${rows.length} rows from ${f.name}`));
+  } catch (e) { $("gProg").textContent = L("Błąd: ", "Error: ") + (e.message || String(e)).split("\n").slice(-2).join(" "); }
+});
+// serwer GAMA (gama-headless -socket): load z run_seed, kroki do end_cycle − 1, odczyt sum phantomów
+function gamaConnect(url) {
+  return new Promise((res, rej) => {
+    let ws;
+    try { ws = new WebSocket(url); } catch (e) { rej(e); return; }
+    const q = [];
+    ws.onmessage = (ev) => {
+      let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
+      if (/^Simulation/.test(m.type)) return;
+      if (m.type === "ConnectionSuccessful") { res(api); return; }
+      const w = q.shift(); if (w) w(m);
+    };
+    ws.onerror = () => rej(new Error(L(`brak połączenia z GAMA pod ${url}; uruchom GAMA jako serwer (gama-headless -socket 6868)`,
+      `no connection to GAMA at ${url}; start GAMA as a server (gama-headless -socket 6868)`)));
+    ws.onclose = () => { while (q.length) q.shift()({ type: "Closed", content: L("połączenie zamknięte", "connection closed") }); };
+    const api = {
+      cmd: (o) => new Promise((r) => { q.push(r); ws.send(JSON.stringify(o)); }),
+      close: () => ws.close(),
+    };
+  });
+}
+const gErr = (m) => (typeof m.content === "string" ? m.content : (m.content && m.content.message) || m.type).split("\n").filter(Boolean).pop();
+async function gamaServerRun() {
+  const url = $("gUrl").value.trim(), dir = $("gDir").value.trim();
+  try { localStorage.setItem("psm-web:gama-url", url); localStorage.setItem("psm-web:gama-dir", dir); } catch (e) { /* bez zapamiętywania */ }
+  if (!dir) { $("gProg").textContent = L("Podaj folder z rozpakowanym pakietem.", "Enter the folder with the unpacked package."); return; }
+  GM.stop = false; GM.fileHash = null;
+  $("gRun").disabled = true; $("gStop").disabled = false;
+  const rows = [];
+  const t0 = performance.now();
+  try {
+    const { seeds, res } = await gamaBuild(false);
+    const sep = dir.includes("\\") ? "\\" : "/";
+    const path = dir.replace(/[\\/]+$/, "") + sep + res.info.model_file;
+    const end = readParams().end_cycle;
+    $("gProg").textContent = L("Łączenie z GAMA…", "Connecting to GAMA…");
+    const g = GM.ws = await gamaConnect(url);
+    for (const [k, seed] of seeds.entries()) {
+      if (GM.stop) break;
+      let m = await g.cmd({ type: "load", model: path, experiment: res.info.experiment, console: false, status: false, dialog: false, runtime: true,
+        parameters: [{ type: "float", name: "run_seed", value: seed }] });
+      if (m.type !== "CommandExecutedSuccessfully") {
+        const msg = gErr(m);
+        throw new Error(/not exist|exist|find|FileNotFound|No such/i.test(msg)
+          ? L(`GAMA nie znalazła ${path}. Pobierz pakiet dla bieżących ustawień i rozpakuj go do tego folderu.`, `GAMA could not find ${path}. Download the package for the current settings and unpack it into this folder.`)
+          : msg);
+      }
+      const id = m.content;
+      let c = 0;
+      while (c < end - 1 && !GM.stop) {
+        const n = Math.min(500, end - 1 - c);
+        m = await g.cmd({ type: "step", exp_id: id, nb_step: n, sync: true });
+        if (m.type !== "CommandExecutedSuccessfully") throw new Error(gErr(m));
+        c += n;
+        $("gProg").textContent = `GAMA: seed ${seed} (${k + 1}/${seeds.length}) · ${L("cykl", "cycle")} ${c} · ${((performance.now() - t0) / 1000).toFixed(0)} s`;
+      }
+      if (!GM.stop) {
+        m = await g.cmd({ type: "expression", exp_id: id, expr: "phantom collect [each.total_adrenaline, each.total_cortisol, each.total_vigilance]" });
+        if (m.type !== "CommandExecutedSuccessfully") throw new Error(gErr(m));
+        JSON.parse(m.content).forEach((q, i) => rows.push({ seed, phantom: i, total_adrenaline: q[0], total_cortisol: q[1], total_vigilance: q[2] }));
+        GM.gama = rows.slice(); renderGama();
+      }
+      await g.cmd({ type: "stop", exp_id: id });
+    }
+    g.close();
+  } catch (e) { $("gProg").textContent = L("Błąd: ", "Error: ") + (e.message || String(e)); }
+  GM.ws = null;
+  $("gRun").disabled = false; $("gStop").disabled = true;
+  if (rows.length) await gamaCompare(rows, L(`GAMA: ${new Set(rows.map((r) => r.seed)).size} przebiegów z serwera`, `GAMA: ${new Set(rows.map((r) => r.seed)).size} runs from the server`) + (GM.stop ? L(" (zatrzymano)", " (stopped)") : ""));
+}
+document.querySelectorAll('input[name="gMode"]').forEach((r) => r.addEventListener("change", gamaModeChanged));
+try {
+  const m = localStorage.getItem("psm-web:gama-mode");
+  if (m) document.querySelector(`input[name="gMode"][value="${m}"]`).checked = true;
+  $("gUrl").value = localStorage.getItem("psm-web:gama-url") || $("gUrl").value;
+  $("gDir").value = localStorage.getItem("psm-web:gama-dir") || "";
+} catch (e) { /* bez zapamiętywania */ }
+gamaModeChanged();
+$("gPkg").onclick = gamaDownload;
+$("gPkg2").onclick = gamaDownload;
+$("gRun").onclick = gamaServerRun;
+$("gStop").onclick = () => { GM.stop = true; BG.stop(); };
+$("gMetric").onchange = renderGama;
+$("gDl").onclick = () => {
+  const keys = ["impl", "seed", "phantom", ...G_METRICS.map((m) => m.key)];
+  const rows = [...GM.gama.map((r) => Object.assign({ impl: "gama" }, r)), ...GM.py.map((r) => Object.assign({ impl: "python" }, r))];
+  download("gama_python.csv", [keys.join(","), ...rows.map((r) => keys.map((k) => r[k]).join(","))].join("\n") + "\n");
+};
+document.querySelector('nav.tabs button[data-tab="gama"]').addEventListener("click", gamaCycles);
+UX.disabledHint("gStop", "Działa w trakcie liczenia w GAMA.", "Active while GAMA is computing.");
+UX.disabledHint("gDl", "Najpierw wczytaj albo policz wyniki GAMA.", "Load or compute GAMA results first.");
+I18N.onChange(() => { renderGama(); gamaCycles(); });
+
 // ---------- V: wszystkie parki z biblioteki ----------
 let parksRes = null;
 function parkGroups() {
@@ -1592,9 +1917,10 @@ UX.a11y({ main: $("main"), tabs: document.querySelector("nav.tabs"), live: [$("m
   [$("bBoxCanvas"), "Wykres pudełkowy wybranego wyniku w wariantach", "Box plot of the chosen output per variant"],
   [$("bHeat"), "Mapa ciepła średniej wybranego wyniku dla dwóch parametrów", "Heat map of the mean of the chosen output for two parameters"],
   [$("vCanvas"), "Wykres pudełkowy wybranego wyniku w parkach", "Box plot of the chosen output per park"],
+  [$("gCanvas"), "Wykres pudełkowy wyniku w GAMA i w Pythonie", "Box plot of the output in GAMA and in Python"],
 ] });
-[$("map"), $("bBoxCanvas"), $("bHeat"), $("vCanvas")].forEach((c) => c.setAttribute("role", "img"));
-UX.pngButtons([...document.querySelectorAll('section[data-panel="sim"] figure.display'), $("cmpPanel"), $("bBox"), $("bHeatBox"), $("vBox")]);
+[$("map"), $("bBoxCanvas"), $("bHeat"), $("vCanvas"), $("gCanvas")].forEach((c) => c.setAttribute("role", "img"));
+UX.pngButtons([...document.querySelectorAll('section[data-panel="sim"] figure.display'), $("cmpPanel"), $("bBox"), $("bHeatBox"), $("vBox"), $("gBox")]);
 const MOB = UX.mobileTabs(document.querySelector('section[data-panel="sim"]'));
 $("bBoxMetric").onchange = renderBox;
 function startTour(force) {
