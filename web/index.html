@@ -382,6 +382,26 @@ code { font-family: var(--font-mono); font-size: 12.5px; }
     </div>
     <div class="controls"><button class="btn" id="vDl" disabled>parks.csv</button></div>
   </div>
+  <div class="panel" id="multiPanel">
+    <h2>Wiele projektów: ranking</h2>
+    <p class="hint">Każdy plik to jeden projekt (wariant parku). Wszystkie projekty liczone są z ustawieniami z zakładki Symulacja i z tymi samymi seedami, bez animacji; tabela szereguje je od najniższej średniej wybranego wyniku. Format plików jak w polu „własne pliki” (jeden GeoJSON ze ścieżkami i przeszkodami albo sam <code>.shp</code> ścieżek).</p>
+    <div class="field stack"><label for="mFiles">Pliki projektów (.geojson, .json, .shp)</label>
+      <input type="file" id="mFiles" accept=".geojson,.json,.shp" multiple></div>
+    <p class="hint" id="mInfo" data-noi18n></p>
+    <div class="controls">
+      <div class="field"><label for="mCycles">Cykle</label><input type="number" id="mCycles" min="1" value="10000"></div>
+      <div class="field"><label for="mSeeds">Liczba seedów</label><input type="number" id="mSeeds" min="1" max="30" value="5"></div>
+      <div class="field wide"><label for="mN">Liczba botów</label>
+        <select id="mN" data-nosort><option value="density">20 na km ścieżki</option><option value="params">z ustawień</option></select></div>
+      <div class="field wide"><label for="mMetric">Ranking według</label><select id="mMetric" data-nosort></select></div>
+      <button class="btn primary" id="mRun" disabled>Policz ranking</button>
+      <button class="btn" id="mStop" disabled>Zatrzymaj</button>
+    </div>
+    <p class="hint mono" id="mProg" data-noi18n>—</p>
+    <div class="table-wrap" id="mTable" data-noi18n></div>
+    <div class="box-plot" id="mBox" hidden><canvas id="mCanvas"></canvas></div>
+    <div class="controls"><button class="btn" id="mDl" disabled>projects.csv</button></div>
+  </div>
 </section>
 
 <!-- GAMA -->
@@ -1951,6 +1971,86 @@ async function runParks() {
 }
 $("vRun").onclick = runParks;
 $("vStop").onclick = () => BG.stop();
+
+// ---------- wiele projektów (pliki użytkownika) -> ranking ----------
+let multi = { items: [], res: null };
+async function multiFilesChanged() {
+  const fs = [...$("mFiles").files];
+  multi = { items: [], res: null };
+  const bad = [];
+  for (const [i, f] of fs.entries()) {
+    const path = "/tmp/proj_" + i + "_" + f.name.replace(/[^\w.-]/g, "_");
+    const data = new Uint8Array(await f.arrayBuffer());
+    try {
+      py.FS.writeFile(path, data);
+      const info = JSON.parse(py.globals.get("_load")(path, null));
+      multi.items.push({ name: f.name.replace(/\.(geo)?json$|\.shp$/i, ""), path, data, length_m: info.length_m, roads: info.roads, obstacles: info.obstacles });
+    } catch (e) { bad.push(UX.fileError(e, f.name)); }
+  }
+  const ok = multi.items.map((it) => `${it.name} (${(it.length_m / 1000).toFixed(2).replace(".", L(",", "."))} km, ${it.obstacles} ${L("przeszk.", "obst.")})`);
+  $("mInfo").textContent = (ok.length ? L("Projekty: ", "Projects: ") + ok.join("; ") + ". " : "") + bad.join(" ");
+  $("mRun").disabled = multi.items.length < 2;
+  renderMulti();
+}
+function multiGroups() {
+  const k = $("mMetric").value;
+  const gs = multi.items.map((it) => ({ label: it.name, N: multi.res.bots[it.name], km: it.length_m / 1000, recs: multi.res.rows.filter((r) => r.project === it.name) }));
+  const m = (g) => { const a = g.recs.map((r) => r[k]).filter((v) => typeof v === "number"); return a.length ? UX.mean(a) : Infinity; };
+  return gs.sort((a, b) => m(a) - m(b)).map((g, i) => Object.assign(g, { label: (i + 1) + ". " + g.label }));
+}
+function renderMulti() {
+  const sel = $("mMetric");
+  if (!sel.options.length) REP_METRICS.forEach((m) => sel.add(new Option(L(m.pl, m.en), m.key)));
+  [...sel.options].forEach((o) => { const m = REP_METRICS.find((x) => x.key === o.value); o.textContent = L(m.pl, m.en); });
+  $("mBox").hidden = !(multi.res && multi.res.rows.length);
+  if (!multi.res) { $("mTable").replaceChildren(); return; }
+  const groups = multiGroups(), ref = REP_METRICS.find((m) => m.key === sel.value);
+  UX.groupTable($("mTable"), groups, REP_METRICS, [{ pl: "km ścieżek", en: "km of paths", get: (g) => g.km.toFixed(2) },
+    { pl: "botów", en: "bots", get: (g) => String(g.N) }], { ref });
+  if (!$("mBox").hidden) UX.boxPlot($("mCanvas"), groups.map((g) => ({ label: g.label, values: g.recs.map((r) => r[sel.value]) })), L(ref.pl, ref.en));
+}
+async function runMulti() {
+  if (!py || multi.items.length < 2) return;
+  const cyc = Math.max(1, parseInt($("mCycles").value, 10) || 10000);
+  const ns = Math.min(30, Math.max(1, parseInt($("mSeeds").value, 10) || 1));
+  const dens = $("mN").value === "density";
+  const base = Object.assign(readParams(), { park: "file" });
+  const files = {}, runs = [], bots = {};
+  multi.items.forEach((it) => {
+    files[it.path] = it.data;
+    bots[it.name] = dens ? Math.max(1, Math.round(20 * it.length_m / 1000)) : base.bot_nb;
+    for (let seed = 1; seed <= ns; seed++) runs.push({ name: it.name, seed, park: it.path, params: Object.assign({}, base, { bot_nb: bots[it.name] }) });
+  });
+  multi.res = { rows: [], bots, cyc, base, dens };
+  $("mRun").disabled = true; $("mStop").disabled = false; $("mDl").disabled = true;
+  $("mProg").textContent = L(...BG_START);
+  const t0 = performance.now();
+  let err = "", out = { stopped: false };
+  try {
+    out = await BG.run("_job_runs(_J_runs, _J_cyc, 1000)", { _J_runs: JSON.stringify(runs), _J_cyc: cyc }, (ev) => {
+      const r = runs[ev.k];
+      if (ev.t === "run") { multi.res.rows.push(Object.assign({ project: r.name, seed: r.seed, bot_nb: r.params.bot_nb }, ev.m)); renderMulti(); return; }
+      $("mProg").textContent = `${multi.res.rows.length + 1}/${runs.length} · ${r.name} · seed ${r.seed} · ${L("cykl", "cycle")} ${ev.cycle} · ${((performance.now() - t0) / 1000).toFixed(0)} s`;
+    }, files);
+  } catch (e) { err = (e.message || String(e)).split("\n").slice(-2).join(" "); }
+  $("mProg").textContent = err ? L("Błąd: ", "Error: ") + err
+    : (out.stopped ? L("Zatrzymano", "Stopped") : L("Gotowe", "Done")) + ` · ${multi.res.rows.length} ${L("przebiegów", "runs")} · ${((performance.now() - t0) / 1000).toFixed(0)} s`;
+  $("mRun").disabled = false; $("mStop").disabled = true; $("mDl").disabled = !multi.res.rows.length;
+  renderMulti();
+}
+$("mFiles").addEventListener("change", () => { if (py) multiFilesChanged(); });
+$("mRun").onclick = runMulti;
+$("mStop").onclick = () => BG.stop();
+$("mMetric").onchange = renderMulti;
+$("mDl").onclick = () => {
+  const keys = ["project", "seed", "bot_nb", ...REP_METRICS.map((m) => m.key)];
+  const q = (v) => (typeof v === "string" && /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v);
+  download("projects.csv", [keys.join(","), ...multi.res.rows.map((r) => keys.map((k) => q(r[k])).join(","))].join("\n") + "\n");
+};
+UX.disabledHint("mRun", "Wybierz co najmniej dwa pliki projektów.", "Choose at least two project files.");
+UX.disabledHint("mDl", "Najpierw policz ranking.", "Compute the ranking first.");
+I18N.onChange(renderMulti);
+renderMulti();
 $("vMetric").onchange = renderParks;
 $("vDl").onclick = () => {
   const keys = ["park", "seed", "bot_nb", ...REP_METRICS.map((m) => m.key)];
