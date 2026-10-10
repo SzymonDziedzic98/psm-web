@@ -227,6 +227,15 @@ code { font-family: var(--font-mono); font-size: 12.5px; }
         <div class="field stack"><label for="obsFile">Przeszkody (np. Staszica_SHP_krzaki_09.shp)</label>
           <input type="file" id="obsFile" accept=".shp,.geojson,.json"></div>
         <p class="hint">Z shapefile wystarczy plik <code>.shp</code>; współrzędne powinny być w metrach (np. EPSG:2180). GeoJSON w stopniach jest rzutowany automatycznie.</p>
+        <details class="hint file-spec"><summary>Format pliku i przykład</summary>
+          <ul class="plain">
+            <li>Ścieżki to linie (LineString, MultiLineString), przeszkody (krzewy, żywopłoty, mury) to poligony.</li>
+            <li>Linie muszą kończyć się na skrzyżowaniach: odcinek między dwoma skrzyżowaniami to osobna linia (w QGIS: Wektor → Narzędzia geometrii → Podziel liniami). Linie, które się tylko przecinają, nie tworzą skrzyżowania.</li>
+            <li>Jeden plik GeoJSON może zawierać obie warstwy: właściwość <code>layer</code> = <code>roads</code>, <code>obstacles</code> albo <code>boundary</code>. Bez niej linie są ścieżkami, a poligony przeszkodami.</li>
+            <li>Współrzędne w metrach (dowolny układ płaski, np. EPSG:2180) albo w stopniach (WGS 84).</li>
+          </ul>
+          <a href="przyklad_park.geojson" download>Pobierz przykładowy plik (GeoJSON: ścieżki i 6 krzewów)</a>
+        </details>
       </div>
       <p class="hint" id="srcInfo" data-noi18n></p>
     </div>
@@ -240,6 +249,7 @@ code { font-family: var(--font-mono); font-size: 12.5px; }
   <div class="results">
     <div class="try-banner" id="tryBanner" hidden data-noi18n></div>
     <div id="messages"></div>
+    <div class="scope-note"><p>Model badawczy, nie ocena projektu ani prognoza wpływu na ludzi. Wynik jest względny: porównuj warianty tego samego parku przy tych samych założeniach. Więcej w zakładce „O modelu”.</p></div>
     <dl class="stats" id="stats"></dl>
     <div class="displays">
       <figure class="display">
@@ -288,6 +298,7 @@ code { font-family: var(--font-mono); font-size: 12.5px; }
         <button class="btn" id="dlFear" disabled>fear_edges.csv</button>
         <button class="btn" id="dlEdges" disabled>edges.csv (stres i izowisty)</button>
         <button class="btn" id="dlConfig" disabled>config.json</button>
+        <button class="btn" id="btnPrint" disabled>Drukuj / PDF</button>
       </div>
     </div>
   </div>
@@ -342,6 +353,7 @@ code { font-family: var(--font-mono); font-size: 12.5px; }
       <h2>Rozkład wyniku w wariantach</h2>
       <div class="controls"><select id="bBoxMetric" aria-label="Wynik na wykresie" data-nosort></select></div>
       <canvas id="bBoxCanvas"></canvas>
+      <div class="table-wrap" id="bStab"></div>
     </div>
     <div class="box-plot" id="bHeatBox" hidden>
       <h2>Mapa ciepła: dwa zmieniane parametry</h2>
@@ -353,12 +365,12 @@ code { font-family: var(--font-mono); font-size: 12.5px; }
   </div>
   <div class="panel" id="parksPanel">
     <h2>Wszystkie parki z biblioteki</h2>
-    <p class="hint">Ustawienia z zakładki Symulacja na każdym parku z biblioteki, bez animacji, z seedami od 1 do podanej liczby. Botów jest tyle, ile w ustawieniach, albo 20 na kilometr ścieżki.</p>
+    <p class="hint">Ustawienia z zakładki Symulacja na każdym parku z biblioteki, bez animacji, z seedami od 1 do podanej liczby. Domyślnie botów jest 20 na kilometr ścieżki, bo parki mają od 2 do 32 km ścieżek; przy liczbie „z ustawień” gęstość ruchu różni się między parkami.</p>
     <div class="controls">
       <div class="field"><label for="vCycles">Cykle</label><input type="number" id="vCycles" min="1" value="10000"></div>
       <div class="field"><label for="vSeeds">Liczba seedów</label><input type="number" id="vSeeds" min="1" max="30" value="3"></div>
       <div class="field wide"><label for="vN">Liczba botów</label>
-        <select id="vN" data-nosort><option value="params">z ustawień</option><option value="density">20 na km ścieżki</option></select></div>
+        <select id="vN" data-nosort><option value="density">20 na km ścieżki</option><option value="params">z ustawień</option></select></div>
       <button class="btn primary" id="vRun">Porównaj parki</button>
       <button class="btn" id="vStop" disabled>Zatrzymaj</button>
     </div>
@@ -370,6 +382,26 @@ code { font-family: var(--font-mono); font-size: 12.5px; }
       <canvas id="vCanvas"></canvas>
     </div>
     <div class="controls"><button class="btn" id="vDl" disabled>parks.csv</button></div>
+  </div>
+  <div class="panel" id="multiPanel">
+    <h2>Wiele projektów: ranking</h2>
+    <p class="hint">Każdy plik to jeden projekt (wariant parku). Wszystkie projekty liczone są z ustawieniami z zakładki Symulacja i z tymi samymi seedami, bez animacji; tabela szereguje je od najniższej średniej wybranego wyniku. Format plików jak w polu „własne pliki” (jeden GeoJSON ze ścieżkami i przeszkodami albo sam <code>.shp</code> ścieżek).</p>
+    <div class="field stack"><label for="mFiles">Pliki projektów (.geojson, .json, .shp)</label>
+      <input type="file" id="mFiles" accept=".geojson,.json,.shp" multiple></div>
+    <p class="hint" id="mInfo" data-noi18n></p>
+    <div class="controls">
+      <div class="field"><label for="mCycles">Cykle</label><input type="number" id="mCycles" min="1" value="10000"></div>
+      <div class="field"><label for="mSeeds">Liczba seedów</label><input type="number" id="mSeeds" min="1" max="30" value="5"></div>
+      <div class="field wide"><label for="mN">Liczba botów</label>
+        <select id="mN" data-nosort><option value="density">20 na km ścieżki</option><option value="params">z ustawień</option></select></div>
+      <div class="field wide"><label for="mMetric">Ranking według</label><select id="mMetric" data-nosort></select></div>
+      <button class="btn primary" id="mRun" disabled>Policz ranking</button>
+      <button class="btn" id="mStop" disabled>Zatrzymaj</button>
+    </div>
+    <p class="hint mono" id="mProg" data-noi18n>—</p>
+    <div class="table-wrap" id="mTable" data-noi18n></div>
+    <div class="box-plot" id="mBox" hidden><canvas id="mCanvas"></canvas></div>
+    <div class="controls"><button class="btn" id="mDl" disabled>projects.csv</button></div>
   </div>
 </section>
 
@@ -442,6 +474,16 @@ code { font-family: var(--font-mono); font-size: 12.5px; }
     <h2>O modelu</h2>
     <h3>Czym jest model</h3>
     <p>PSM (Proxemic Stress Model) symuluje stres osoby idącej przez park. Jeden agent, phantom, idzie alejkami między innymi spacerowiczami (botami) i reaguje na to, jak blisko nich jest. Model pozwala porównać warianty nasadzeń i układu ścieżek, zanim powstaną w terenie.</p>
+    <h3>Zakres stosowania</h3>
+    <ul class="plain">
+      <li>PSM jest modelem badawczym. Nie jest certyfikatem, oceną zgodności z przepisami ani prognozą wpływu projektu na zdrowie lub samopoczucie ludzi.</li>
+      <li>Adrenalina, kortyzol i czujność to zmienne modelu, a nie przewidywane stężenia hormonów u odwiedzających.</li>
+      <li>Wynik jest względny: ma sens porównanie wariantów tego samego projektu (np. krzewy przy skrzyżowaniach i odsunięte od nich) przy tych samych założeniach i seedach. Model nie zna progu „akceptowalnego” stresu.</li>
+      <li>Strona sprawdza zgodność tego portu z modelem GAMA (zakładka GAMA). Założenia modelu i ich źródła opisują publikacje o modelu, nie ta strona.</li>
+    </ul>
+    <h3>Ile powtórzeń wystarczy</h3>
+    <p>Model jest losowy, więc jeden przebieg nie wystarcza do oceny układu. Uruchom ten sam wariant z kilkoma seedami i sprawdź kolumnę „pewność” w tabelach porównań i pod wykresem przeglądu wsadowego. Pewność to połowa 95% przedziału ufności średniej wyrażona jako procent średniej. Strona sprawdza też, czy współczynnik zmienności (CV, odchylenie standardowe podzielone przez średnią) przestał się zmieniać przy ostatnich seedach, zgodnie z podejściem Lee i in. (2015). Znak ✓ oznacza przedział węższy niż ±10% i stabilny CV. W przeciwnym razie strona podaje przybliżoną liczbę seedów potrzebną do ±10%: n ≈ (1,96·CV/0,1)². Warianty porównuj przy tych samych seedach.</p>
+    <p class="hint" data-noi18n>Lee, J.-S., Filatova, T., Ligmann-Zielinska, A., Hassani-Mahmooei, B., Stonedahl, F., Lorscheid, I., Voinov, A., Polhill, J. G., Sun, Z., Parker, D. C. (2015). The complexities of agent-based modeling output analysis. Journal of Artificial Societies and Social Simulation 18(4), 4.</p>
     <h3>Jak działa</h3>
     <ul class="plain">
       <li>Wokół phantoma są cztery strefy Halla: intymna, osobista, społeczna i publiczna. Ich promienie to promienie Halla razy mnożnik stref (domyślnie 4).</li>
@@ -546,7 +588,8 @@ def _load(roads_path, obs_path):
     rd = open(roads_path, "rb").read() if roads_path else None
     od = open(obs_path, "rb").read() if obs_path else None
     _INPUTS = psm.load_inputs(rd, od, roads_path or "", obs_path or "")
-    return json.dumps(dict(psm.LOAD_INFO, roads=len(_INPUTS[0]), obstacles=len(_INPUTS[1])))
+    length = sum(((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2) ** 0.5 for pts in _INPUTS[0] for a, b in zip(pts, pts[1:]))
+    return json.dumps(dict(psm.LOAD_INFO, roads=len(_INPUTS[0]), obstacles=len(_INPUTS[1]), length_m=round(length)))
 
 def _clean(o):
     # NaN (np. brak zmienności wyniku) -> null, bo JSON.parse nie przyjmuje NaN
@@ -938,11 +981,31 @@ async function loadFiles() {
   const rf = $("roadsFile").files[0], of = $("obsFile").files[0];
   if (!rf) throw new Error(L("Wskaż plik ścieżek.", "Choose a paths file."));
   const rp = "/tmp/" + rf.name;
-  py.FS.writeFile(rp, new Uint8Array(await rf.arrayBuffer()));
   let op = null;
-  if (of) { op = "/tmp/" + of.name; py.FS.writeFile(op, new Uint8Array(await of.arrayBuffer())); }
-  return JSON.parse(py.globals.get("_load")(rp, op));
+  try {
+    py.FS.writeFile(rp, new Uint8Array(await rf.arrayBuffer()));
+    if (of) { op = "/tmp/" + of.name; py.FS.writeFile(op, new Uint8Array(await of.arrayBuffer())); }
+    return JSON.parse(py.globals.get("_load")(rp, op));
+  } catch (e) {
+    // który plik zawiódł: najpierw same ścieżki
+    let bad = rf.name;
+    if (of) { try { py.globals.get("_load")(rp, null); bad = of.name; } catch (e2) { /* winne ścieżki */ } }
+    const err = new Error(UX.fileError(e, bad)); err.friendly = true; throw err;
+  }
 }
+// potwierdzenie od razu po wyborze pliku: liczba odcinków, długość, przeszkody
+async function checkFiles() {
+  if (!py || $("srcKind").value !== "files" || !$("roadsFile").files[0]) { sourceChanged(); return; }
+  try {
+    const i = await loadFiles();
+    $("srcInfo").textContent = L("Wczytano: ", "Loaded: ") + i.roads + L(" odcinków ścieżek, ", " path segments, ") +
+      (i.length_m >= 1000 ? (i.length_m / 1000).toFixed(1).replace(".", L(",", ".")) + " km" : i.length_m + " m") +
+      L(", przeszkód: ", ", obstacles: ") + i.obstacles +
+      (i.parts_after > 1 ? L(`; sieć ma ${i.parts_after} rozłączne części, agenci chodzą po największej`, `; the network has ${i.parts_after} separate parts, agents walk on the largest`) : "") +
+      L(". Kliknij Inicjalizuj.", ". Click Initialise.");
+  } catch (e) { $("srcInfo").textContent = e.friendly ? e.message : UX.fileError(e); }
+}
+["roadsFile", "obsFile"].forEach((id) => $(id).addEventListener("change", checkFiles));
 
 // ---------- symulacja ----------
 async function initModel() {
@@ -956,7 +1019,7 @@ async function initModel() {
     if (kind === "osm") { py.FS.writeFile("/tmp/osm.json", osmJson); py.globals.get("_load")("/tmp/osm.json", null); }
     net = JSON.parse(py.globals.get("_init")(JSON.stringify(readParams()), $("seed").value.trim(), kind !== "generated"));
   } catch (e) {
-    showMsg(L("Inicjalizacja nie powiodła się: ", "Initialisation failed: ") + (e.message || e).toString().split("\n").slice(-2).join(" "), "error");
+    showMsg(e.friendly ? e.message : L("Inicjalizacja nie powiodła się: ", "Initialisation failed: ") + (e.message || e).toString().split("\n").slice(-2).join(" "), "error");
     return;
   }
   hasModel = true;
@@ -971,7 +1034,7 @@ async function initModel() {
   renderNet();
   if (net.n_components > 1) showMsg(L("Sieć ma ", "The network has ") + net.n_components +
     L(" rozłączne części; agenci chodzą po największej.", " separate parts; agents walk on the largest one."), "warn");
-  ["btnRun", "btnStep", "dlSummary", "dlSeries", "dlFear", "dlEdges", "dlConfig", "btnIso"].forEach((id) => $(id).disabled = false);
+  ["btnRun", "btnStep", "dlSummary", "dlSeries", "dlFear", "dlEdges", "dlConfig", "btnIso", "btnPrint"].forEach((id) => $(id).disabled = false);
   isoVals = null;
   isoCmp = null;
   renderLayerInfo();
@@ -1287,7 +1350,9 @@ function renderBox() {
     const v = r[sel.value];
     if (typeof v === "number") groups.get(g).push(v);
   });
-  UX.boxPlot($("bBoxCanvas"), [...groups].map(([label, values]) => ({ label, values })), sel.value);
+  const bg = [...groups].map(([label, values]) => ({ label, values }));
+  UX.boxPlot($("bBoxCanvas"), bg, sel.value);
+  UX.stabilityTable($("bStab"), bg, sel.value);
   // S: dwa zmieniane parametry -> mapa ciepła średniej
   $("bHeatBox").hidden = vary.length !== 2;
   if (vary.length === 2) {
@@ -1480,7 +1545,19 @@ const CMP = UX.compare($("cmpPanel"), [
   { key: "cortisol", pl: "kortyzol (bieżący)", en: "cortisol (current)" },
 ]);
 let runNo = 0, tryLabel = null, lastConfig = null, batchConfig = null, liveChanged = false, MODEL_HASH = "";
-UX.disabledHint("dlConfig", "Najpierw kliknij Inicjalizuj.", "Click Initialise first.");
+UX.disabledHint(["dlConfig", "btnPrint"], "Najpierw kliknij Inicjalizuj.", "Click Initialise first.");
+// wydruk: wyniki z zakładki Symulacja i ustawienia przebiegu
+UX.printButton($("btnPrint"), document.querySelector('section[data-panel="sim"] > .results'), () => {
+  const c = lastConfig || simConfig();
+  return {
+    title: L("PSM – podsumowanie przebiegu", "PSM – run summary"),
+    note: L("Model badawczy, nie ocena projektu ani prognoza wpływu na ludzi. Wynik jest względny: ma sens porównanie wariantów przy tych samych założeniach.",
+      "A research model, not an assessment of the design or a forecast of effects on people. The result is relative: compare variants under the same assumptions."),
+    rows: [[L("park", "park"), c.park], ["seed", c.seed || L("losowy", "random")], [L("cykl", "cycle"), String(snap ? snap.cycle : 0)],
+      [L("wersja modelu", "model version"), c.model_version || "–"], [L("zmiany w trakcie", "changed during run"), liveChanged ? L("tak", "yes") : L("nie", "no")],
+      ...Object.entries(c.params).map(([k, v]) => [k, UX.fmtValue(v)])],
+  };
+});
 UX.disabledHint("bDlCfg", "Najpierw uruchom eksperyment.", "Run an experiment first.");
 UX.shortcuts({
   Space: () => { if (!$("btnRun").disabled) $("btnRun").click(); },
@@ -1857,11 +1934,12 @@ function parkGroups() {
 function renderParks() {
   if (!parksRes) return;
   const groups = parkGroups();
-  UX.groupTable($("vTable"), groups, REP_METRICS, [{ pl: "botów", en: "bots", get: (g) => String(g.N) }]);
-  $("vBox").hidden = !parksRes.res.length;
-  if ($("vBox").hidden) return;
   const sel = $("vMetric");
   if (!sel.options.length) REP_METRICS.forEach((m) => sel.add(new Option(L(m.pl, m.en), m.key)));
+  UX.groupTable($("vTable"), groups, REP_METRICS, [{ pl: "botów", en: "bots", get: (g) => String(g.N) }],
+    { ref: REP_METRICS.find((m) => m.key === sel.value) || REP_METRICS[0] });
+  $("vBox").hidden = !parksRes.res.length;
+  if ($("vBox").hidden) return;
   [...sel.options].forEach((o) => { const m = REP_METRICS.find((x) => x.key === o.value); o.textContent = L(m.pl, m.en); });
   UX.boxPlot($("vCanvas"), groups.map((g) => ({ label: g.label.replace(/^Park /, ""), values: g.recs.map((r) => r[sel.value]) })),
     sel.options[sel.selectedIndex].textContent);
@@ -1899,6 +1977,86 @@ async function runParks() {
 }
 $("vRun").onclick = runParks;
 $("vStop").onclick = () => BG.stop();
+
+// ---------- wiele projektów (pliki użytkownika) -> ranking ----------
+let multi = { items: [], res: null };
+async function multiFilesChanged() {
+  const fs = [...$("mFiles").files];
+  multi = { items: [], res: null };
+  const bad = [];
+  for (const [i, f] of fs.entries()) {
+    const path = "/tmp/proj_" + i + "_" + f.name.replace(/[^\w.-]/g, "_");
+    const data = new Uint8Array(await f.arrayBuffer());
+    try {
+      py.FS.writeFile(path, data);
+      const info = JSON.parse(py.globals.get("_load")(path, null));
+      multi.items.push({ name: f.name.replace(/\.(geo)?json$|\.shp$/i, ""), path, data, length_m: info.length_m, roads: info.roads, obstacles: info.obstacles });
+    } catch (e) { bad.push(UX.fileError(e, f.name)); }
+  }
+  const ok = multi.items.map((it) => `${it.name} (${(it.length_m / 1000).toFixed(2).replace(".", L(",", "."))} km, ${it.obstacles} ${L("przeszk.", "obst.")})`);
+  $("mInfo").textContent = (ok.length ? L("Projekty: ", "Projects: ") + ok.join("; ") + ". " : "") + bad.join(" ");
+  $("mRun").disabled = multi.items.length < 2;
+  renderMulti();
+}
+function multiGroups() {
+  const k = $("mMetric").value;
+  const gs = multi.items.map((it) => ({ label: it.name, N: multi.res.bots[it.name], km: it.length_m / 1000, recs: multi.res.rows.filter((r) => r.project === it.name) }));
+  const m = (g) => { const a = g.recs.map((r) => r[k]).filter((v) => typeof v === "number"); return a.length ? UX.mean(a) : Infinity; };
+  return gs.sort((a, b) => m(a) - m(b)).map((g, i) => Object.assign(g, { label: (i + 1) + ". " + g.label }));
+}
+function renderMulti() {
+  const sel = $("mMetric");
+  if (!sel.options.length) REP_METRICS.forEach((m) => sel.add(new Option(L(m.pl, m.en), m.key)));
+  [...sel.options].forEach((o) => { const m = REP_METRICS.find((x) => x.key === o.value); o.textContent = L(m.pl, m.en); });
+  $("mBox").hidden = !(multi.res && multi.res.rows.length);
+  if (!multi.res) { $("mTable").replaceChildren(); return; }
+  const groups = multiGroups(), ref = REP_METRICS.find((m) => m.key === sel.value);
+  UX.groupTable($("mTable"), groups, REP_METRICS, [{ pl: "km ścieżek", en: "km of paths", get: (g) => g.km.toFixed(2) },
+    { pl: "botów", en: "bots", get: (g) => String(g.N) }], { ref });
+  if (!$("mBox").hidden) UX.boxPlot($("mCanvas"), groups.map((g) => ({ label: g.label, values: g.recs.map((r) => r[sel.value]) })), L(ref.pl, ref.en));
+}
+async function runMulti() {
+  if (!py || multi.items.length < 2) return;
+  const cyc = Math.max(1, parseInt($("mCycles").value, 10) || 10000);
+  const ns = Math.min(30, Math.max(1, parseInt($("mSeeds").value, 10) || 1));
+  const dens = $("mN").value === "density";
+  const base = Object.assign(readParams(), { park: "file" });
+  const files = {}, runs = [], bots = {};
+  multi.items.forEach((it) => {
+    files[it.path] = it.data;
+    bots[it.name] = dens ? Math.max(1, Math.round(20 * it.length_m / 1000)) : base.bot_nb;
+    for (let seed = 1; seed <= ns; seed++) runs.push({ name: it.name, seed, park: it.path, params: Object.assign({}, base, { bot_nb: bots[it.name] }) });
+  });
+  multi.res = { rows: [], bots, cyc, base, dens };
+  $("mRun").disabled = true; $("mStop").disabled = false; $("mDl").disabled = true;
+  $("mProg").textContent = L(...BG_START);
+  const t0 = performance.now();
+  let err = "", out = { stopped: false };
+  try {
+    out = await BG.run("_job_runs(_J_runs, _J_cyc, 1000)", { _J_runs: JSON.stringify(runs), _J_cyc: cyc }, (ev) => {
+      const r = runs[ev.k];
+      if (ev.t === "run") { multi.res.rows.push(Object.assign({ project: r.name, seed: r.seed, bot_nb: r.params.bot_nb }, ev.m)); renderMulti(); return; }
+      $("mProg").textContent = `${multi.res.rows.length + 1}/${runs.length} · ${r.name} · seed ${r.seed} · ${L("cykl", "cycle")} ${ev.cycle} · ${((performance.now() - t0) / 1000).toFixed(0)} s`;
+    }, files);
+  } catch (e) { err = (e.message || String(e)).split("\n").slice(-2).join(" "); }
+  $("mProg").textContent = err ? L("Błąd: ", "Error: ") + err
+    : (out.stopped ? L("Zatrzymano", "Stopped") : L("Gotowe", "Done")) + ` · ${multi.res.rows.length} ${L("przebiegów", "runs")} · ${((performance.now() - t0) / 1000).toFixed(0)} s`;
+  $("mRun").disabled = false; $("mStop").disabled = true; $("mDl").disabled = !multi.res.rows.length;
+  renderMulti();
+}
+$("mFiles").addEventListener("change", () => { if (py) multiFilesChanged(); });
+$("mRun").onclick = runMulti;
+$("mStop").onclick = () => BG.stop();
+$("mMetric").onchange = renderMulti;
+$("mDl").onclick = () => {
+  const keys = ["project", "seed", "bot_nb", ...REP_METRICS.map((m) => m.key)];
+  const q = (v) => (typeof v === "string" && /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v);
+  download("projects.csv", [keys.join(","), ...multi.res.rows.map((r) => keys.map((k) => q(r[k])).join(","))].join("\n") + "\n");
+};
+UX.disabledHint("mRun", "Wybierz co najmniej dwa pliki projektów.", "Choose at least two project files.");
+UX.disabledHint("mDl", "Najpierw policz ranking.", "Compute the ranking first.");
+I18N.onChange(renderMulti);
+renderMulti();
 $("vMetric").onchange = renderParks;
 $("vDl").onclick = () => {
   const keys = ["park", "seed", "bot_nb", ...REP_METRICS.map((m) => m.key)];

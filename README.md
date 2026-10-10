@@ -44,6 +44,7 @@ Model działa w GAMA 2025.6 (sprawdzone: wyniki takie same jak w GAMA 1.9.3). Za
     `--fetch-osm` i przycisk „Zapisz GeoJSON” zapisują sieć już po tych poprawkach (WGS84, warstwy `roads`/`obstacles`/`boundary`,
     znacznik `psm_processed` z punktem rzutu); taki plik wczytuje się bez drugiej obróbki. `--process PLIK --out WYNIK` poprawia
     wcześniej zapisany surowy plik.
+  - `web/przyklad_park.geojson` – mały przykładowy plik (ścieżki i krzewy w jednym GeoJSON, WGS 84) jako wzór formatu; strona daje go do pobrania przy polach plików.
   - `web/parki/` – gotowe parki Wrocławia po poprawkach (Staszica, Szczytnicki, Południowy, Grabiszyński, Zachodni; OSM, ODbL,
     pobrane 2026-09-28). W aplikacji: „Wczytaj gotowy”, bez pobierania z Overpass. Te same pliki są w repozytorium SIPD.
 - `web/index.html` – uruchamia `psm.py` w przeglądarce (Pyodide): mapa parku z pamięcią strachu na ścieżkach,
