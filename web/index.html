@@ -1173,12 +1173,22 @@ function draw() {
   }
   const [, , social, pub] = snap.zones;
   const phCol = css("--phantom");
-  for (const [x, y] of snap.phantoms) {
-    ctx.beginPath(); ctx.arc(view.X(x), view.Y(y), pub * s, 0, 2 * Math.PI);
-    ctx.fillStyle = phCol; ctx.globalAlpha = 0.10; ctx.fill();
-    ctx.beginPath(); ctx.arc(view.X(x), view.Y(y), social * s, 0, 2 * Math.PI);
-    ctx.globalAlpha = 0.18; ctx.fill(); ctx.globalAlpha = 1;
-  }
+  // strefy zasłonięte przeszkodami (jak masked_by w GAMA); bez przeszkód zwykłe koła
+  const zone = (x, y, r, pts, alpha) => {
+    ctx.beginPath();
+    if (pts) {
+      ctx.moveTo(view.X(pts[0]), view.Y(pts[1]));
+      for (let k = 2; k < pts.length; k += 2) ctx.lineTo(view.X(pts[k]), view.Y(pts[k + 1]));
+      ctx.closePath();
+    } else ctx.arc(view.X(x), view.Y(y), r * s, 0, 2 * Math.PI);
+    ctx.fillStyle = phCol; ctx.globalAlpha = alpha; ctx.fill();
+  };
+  snap.phantoms.forEach(([x, y], i) => {
+    const zp = snap.zone_polys && snap.zone_polys[i];
+    zone(x, y, pub, zp && zp[0], 0.10);
+    zone(x, y, social, zp && zp[1], 0.18);
+    ctx.globalAlpha = 1;
+  });
   const botCol = css("--bot");
   for (const [x, y, h] of snap.bots) tri(ctx, x, y, h, 2.5, botCol);
   for (const [x, y, h] of snap.phantoms) tri(ctx, x, y, h, 5, phCol);

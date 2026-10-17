@@ -1292,8 +1292,8 @@ def _ray_hit(p, dx, dy, a, b):
     return None
 
 
-def isovist(p, obstacles, radius, rays=72, ignore=()):
-    """Izowista w punkcie p: (pole m², średnia długość promienia, udział promieni zasłoniętych)."""
+def ray_lengths(p, obstacles, radius, rays=72, ignore=()):
+    """Długości promieni z p do pierwszej przeszkody (najwyżej radius), równo co 360°/rays."""
     segs = []
     seen = set()
     for key in obstacles._cells(p[0] - radius, p[1] - radius, p[0] + radius, p[1] + radius):
@@ -1313,6 +1313,12 @@ def isovist(p, obstacles, radius, rays=72, ignore=()):
             if t is not None and t < best:
                 best = t
         lengths.append(best)
+    return lengths
+
+
+def isovist(p, obstacles, radius, rays=72, ignore=()):
+    """Izowista w punkcie p: (pole m², średnia długość promienia, udział promieni zasłoniętych)."""
+    lengths = ray_lengths(p, obstacles, radius, rays, ignore)
     dth = 2 * math.pi / rays
     area = sum(0.5 * lengths[k] * lengths[(k + 1) % rays] * math.sin(dth) for k in range(rays))
     blocked = sum(1 for L in lengths if L < radius - 1e-9) / rays
@@ -1941,6 +1947,22 @@ class Model:
             "planting": self.planting_info,
         })
 
+    def _zone_polys(self, loc, rays=180):
+        """Strefy publiczna i społeczna przycięte przeszkodami (jak masked_by w GAMA), tylko do rysowania."""
+        if not self.obstacles.polygons:
+            return None
+        pub, soc = float(self.p["public"]), float(self.p["social"])
+        lengths = ray_lengths(loc, self.obstacles, pub, rays, self.obstacles.containing(loc))
+        out = []
+        for rad in (pub, soc):
+            pts = []
+            for k, L in enumerate(lengths):
+                a = 2 * math.pi * k / rays
+                d = min(L, rad)
+                pts += [round(loc[0] + d * math.cos(a), 2), round(loc[1] + d * math.sin(a), 2)]
+            out.append(pts)
+        return out
+
     def snapshot_json(self):
         r = lambda v: round(v, 2)
         p = self.p
@@ -1949,6 +1971,7 @@ class Model:
             "bots": [[r(b.loc[0]), r(b.loc[1]), round(b.heading, 2)] for b in self.bots],
             "phantoms": [[r(ph.loc[0]), r(ph.loc[1]), round(ph.heading, 2)] for ph in self.phantoms],
             "zones": [p["intimate"], p["personal"], p["social"], p["public"]],
+            "zone_polys": [self._zone_polys(ph.loc) for ph in self.phantoms],
             "fears": [[r(f[0][0]), r(f[0][1]), f[1]] for f in self.fears],
             "fear_memory": [round(e.fear_memory, 3) for e in self.net.edges],
             "edge_stress": [round(st[1] / st[0], 3) if st[0] else None for st in self.edge_stats],
@@ -2364,6 +2387,18 @@ def test_zones_and_line_of_sight():
     assert ph.distance_number(m, (30.0, 25.0)) == 1
     # wewnątrz krzaka: zasłonięte
     assert ph.distance_number(m, (21.0, 5.0)) == 0
+
+
+def test_zone_polys_masked_by_bush():
+    bush = [[(20, -5), (22, -5), (22, 5), (20, 5), (20, -5)]]
+    m = _tiny_model(obstacles=[bush])
+    pub_pts, soc_pts = m._zone_polys((10.0, 0.0))
+    # promień 0 (w stronę krzaka) kończy się na krzaku, promień 180° na pełnym promieniu
+    assert abs(pub_pts[0] - 20.0) < 1e-6 and abs(soc_pts[0] - 20.0) < 1e-6
+    k = len(pub_pts) // 4  # indeks pary dla 180°
+    assert abs(pub_pts[2 * (k)] - (10.0 - m.p["public"])) < 0.01
+    assert json.loads(m.snapshot_json())["zone_polys"][0] is not None
+    assert _tiny_model()._zone_polys((0.0, 0.0)) is None
 
 
 def test_psychophysiology_equations():
