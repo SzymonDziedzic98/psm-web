@@ -126,6 +126,25 @@ Wyniki zgadzają się z GAMA statystycznie, nie liczba w liczbę (inny generator
 Pozostałe różnice (linia widoczności zamiast `masked_by`, osadzanie agentów na największej składowej sieci)
 są opisane na początku `psm.py`.
 
+### Profile wieku, percepcja, ciemność i sezon (gałąź `feature/profile-wieku`)
+
+Wszystkie rozszerzenia są domyślnie wyłączone; przy wartościach domyślnych wyniki są identyczne z wersją
+z artykułu UFUG (bee3774) w Pythonie i w GAML. Te same parametry są w `src/psm.py` i `models/PSM.gaml`.
+
+| Zmiana | Parametry (domyślnie) | Co robi |
+|---|---|---|
+| Z3a | `phantom_speed_kmh` (4), `end_cycle` (10000), `bot_speed_kmh`, `bot_speed_sd` | w GAML parametry zamiast stałych |
+| Z3b | `bot_older_share` (0), `bot_older_speed_factor` (0,85) | część botów to wolniejsi starsi piesi |
+| Z12 | `bot_run_share`, `bot_bike_share` (0), prędkości 10 i 16 km/h, `bike_paths_only` (false) | biegacze i rowerzyści; rowerzyści opcjonalnie tylko na `bicycle = yes/designated` |
+| Z4, Z4b | `fov_deg` (360), `rear_factor` (1), `rear_zones` (4), `rear_masked` (true) | stożek widzenia; poza nim tylko `rear_zones` stref od intymnej, promienie × `rear_factor` |
+| Z5 | `dark_on` (false), `lamp_radius` (10 m), `dark_detect_m` (5 m) | bot poza kręgiem lampy niewidoczny dalej niż `dark_detect_m`; lampy: `--lamps plik` albo warstwa `lamps` |
+| Z6 | `season` (summer), `bush_evergreen_share` (1) | zimą znikają przeszkody `leaf_cycle = deciduous`, a bez tej właściwości zostaje podany udział |
+
+Wariant badawczy starszej osoby: `--set fov_deg=120 --set rear_factor=0.6 --set rear_zones=2 --set phantom_speed_kmh=2.8`.
+Wolniejszy phantom przechodzi mniej, więc profile porównuje się na kilometr: `--per-km` dodaje kolumny
+`phantom_km`, `adrenaline_per_km`, `fear_events_per_km` (bez tej flagi pliki wyników mają te same kolumny co dotąd).
+W Pythonie typy botów losuje osobny generator, więc przebiegi z typami i bez są sparowane seed w seed; w GAMA nie.
+
 ## Dane wejściowe
 
 Model wczytuje dwa shapefile, podane ścieżką względną do pliku `.gaml`, więc muszą leżeć w `models/` obok modelu:

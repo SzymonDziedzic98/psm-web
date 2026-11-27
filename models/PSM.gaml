@@ -55,8 +55,41 @@ global {
 	bool move_by_length <- true;
 	map<road, float> length_weights;
 
+	// >>> PROFILE WIEKU (gałąź feature/profile-wieku; wartości domyślne = model jak w v1.0-ufug) <<<
+	// Z3a: prędkość phantoma i koniec przebiegu jako parametry (wcześniej 4 km/h i 10000 na sztywno)
+	float phantom_speed_kmh <- 4.0;
+	int end_cycle <- 10000;
+	float bot_speed_kmh <- 4.0;
+	float bot_speed_sd <- 0.3;         // m/s, gauss(0, 0.3) jak dotąd
+	// Z3b, Z12: typy botów (udziały od wszystkich botów, suma <= 1; reszta to piesi jak dotąd)
+	float bot_older_share <- 0.0;
+	float bot_older_speed_factor <- 0.85;
+	float bot_run_share <- 0.0;
+	float bot_run_speed_kmh <- 10.0;
+	float bot_run_speed_sd <- 0.5;     // m/s
+	float bot_bike_share <- 0.0;
+	float bot_bike_speed_kmh <- 16.0;
+	float bot_bike_speed_sd <- 1.0;    // m/s
+	bool bike_paths_only <- false;     // rowerzyści tylko na odcinkach z atrybutem bicycle = yes/designated
+	graph bike_network;
+	list<road> bike_roads <- [];
+	// Z4, Z4b: stożek widzenia i strefy za plecami
+	float fov_deg <- 360.0;            // 360 = okręgi jak dotąd
+	float rear_factor <- 1.0;          // mnożnik promieni poza stożkiem (Yu i in. 2020: ok. 0,6)
+	int rear_zones <- 4;               // ile stref od intymnej istnieje za plecami: 4 = wszystkie, 2 = intymna i osobista
+	bool rear_masked <- true;          // za plecami też maskowanie przeszkodami
+	// Z5: ciemność z lamp
+	bool dark_on <- false;
+	string lamps_file <- "";           // SHP z punktami lamp; puste = brak lamp (przy dark_on: pełna ciemność)
+	float lamp_radius <- 10.0;
+	float dark_detect_m <- 5.0;
+	// Z6: sezon
+	string season <- "summer";         // "winter": przeszkody z leaf_cycle = deciduous znikają
+	float bush_evergreen_share <- 1.0; // zimą: udział zostających przeszkód bez leaf_cycle
+	// <<< PROFILE WIEKU
+
 	reflex stop_after_steps {
-        if (cycle >= 10000) {
+        if (cycle >= end_cycle) {
            	ask phantom{
            		do die;
            	}
@@ -71,19 +104,62 @@ global {
 	int bot_nb <- 80;
 
     init {
-    	create from: shape_file_obstacles species: obstacle  ;
-        create road from: shape_file_roads ;
+    	if (season = "winter") {
+    		// Z6: zimą krzewy liściaste nie zasłaniają (atrybut leaf_cycle w SHP przeszkód, jak w OSM)
+    		create obstacle from: shape_file_obstacles with: [leaf::string(read("leaf_cycle"))];
+    		ask obstacle {
+    			if (leaf = "deciduous") { do die; }
+    			else if ((leaf = nil or leaf = "" or leaf = "nil") and !flip(bush_evergreen_share)) { do die; }
+    		}
+    	} else {
+    		create from: shape_file_obstacles species: obstacle  ;
+    	}
+    	if (bike_paths_only) {
+    		create road from: shape_file_roads with: [bike_tag::string(read("bicycle"))];
+    	} else {
+        	create road from: shape_file_roads ;
+        }
         create bot number: bot_nb {
-        	speed <- 4 #km/#h + gauss(0,0.3);
+        	speed <- bot_speed_kmh #km/#h + gauss(0, bot_speed_sd);
 			location <- any_location_in( one_of(road) );
 			target <- location;
 			shape <- triangle(5);
         }
         create phantom number: phantom_nb {
-        	speed <- 4 #km/#h ;
+        	speed <- phantom_speed_kmh #km/#h ;
 			location <- any_location_in(one_of(road));
 			target <- location;
 			shape <- triangle(10);
+		}
+		// Z3b, Z12: typy botów po utworzeniu agentów (przy udziałach 0 nic się nie losuje: generator jak dotąd)
+		if (bot_older_share + bot_run_share + bot_bike_share > 0.0) {
+			ask bot {
+				float u <- rnd(1.0);
+				if (u < bot_run_share) {
+					kind <- "run";
+					speed <- max([0.0, bot_run_speed_kmh #km/#h + gauss(0, bot_run_speed_sd)]);
+				} else if (u < bot_run_share + bot_bike_share) {
+					kind <- "bike";
+					speed <- max([0.0, bot_bike_speed_kmh #km/#h + gauss(0, bot_bike_speed_sd)]);
+				} else if (u < bot_run_share + bot_bike_share + bot_older_share) {
+					kind <- "older";
+					speed <- speed * bot_older_speed_factor;
+				}
+			}
+			if (bike_paths_only and bot_bike_share > 0.0) {
+				bike_roads <- road where (each.bike_tag = "yes" or each.bike_tag = "designated");
+				if (!empty(bike_roads)) {
+					bike_network <- as_edge_graph(bike_roads);
+					ask bot where (each.kind = "bike") {
+						location <- any_location_in(one_of(bike_roads));
+						target <- location;
+					}
+				}
+			}
+		}
+		// Z5: lampy
+		if (lamps_file != "") {
+			create lamp from: file(lamps_file);
 		}
 
 		// >>> FEEDBACK: graf z wagami zależnymi od pamięci strachu <<<
@@ -121,7 +197,7 @@ global {
 	}
 	// <<< FEEDBACK
 
-    reflex save_results when: cycle = 9999 {
+    reflex save_results when: cycle = end_cycle - 1 {
     ask phantom {
         save [
             myself.bot_nb,
@@ -138,6 +214,7 @@ global {
 
 }
 species obstacle {
+	string leaf <- "";   // Z6: leaf_cycle (tylko przy season = "winter")
 	aspect default {
 		draw shape color: rgb(0,255,0) at: location ;
 	}
@@ -145,13 +222,17 @@ species obstacle {
 
 species bot skills: [moving] {
 	point target;
+	string kind <- "walk";   // Z3b, Z12: walk / older / run / bike
 
 	reflex normal_move {
+		bool on_bike_net <- (kind = "bike") and (bike_network != nil);
 		if ((target distance_to location)<1) {
-			target <- any_location_in(one_of(road));
+			target <- on_bike_net ? any_location_in(one_of(bike_roads)) : any_location_in(one_of(road));
 		}
 		else {
-			if (move_by_length) {
+			if (on_bike_net) {
+				do goto target: target on: bike_network;
+			} else if (move_by_length) {
 				do goto target: target on: (bots_plain_graph ? bot_network : road_network) move_weights: length_weights;
 			} else {
 				do goto target: target on: (bots_plain_graph ? bot_network : road_network);
@@ -196,6 +277,11 @@ species phantom skills: [moving] {
    geometry social_perception_geometry  update: circle(social, location)  masked_by obstacle;
    geometry personal_perception_geometry  update: circle(personal, location)  masked_by obstacle;
    geometry intimate_perception_geometry    update: circle(intimate, location)    masked_by obstacle;
+   // Z4b: strefy za plecami (liczone tylko przy fov_deg < 360; promienie × rear_factor, rear_zones stref od intymnej)
+   geometry rear_intimate_geometry update: (fov_deg < 360.0 and rear_zones >= 1) ? (rear_masked ? (circle(intimate * rear_factor, location) masked_by obstacle) : circle(intimate * rear_factor, location)) : nil;
+   geometry rear_personal_geometry update: (fov_deg < 360.0 and rear_zones >= 2) ? (rear_masked ? (circle(personal * rear_factor, location) masked_by obstacle) : circle(personal * rear_factor, location)) : nil;
+   geometry rear_social_geometry   update: (fov_deg < 360.0 and rear_zones >= 3) ? (rear_masked ? (circle(social * rear_factor, location) masked_by obstacle) : circle(social * rear_factor, location)) : nil;
+   geometry rear_public_geometry   update: (fov_deg < 360.0 and rear_zones >= 4) ? (rear_masked ? (circle(public * rear_factor, location) masked_by obstacle) : circle(public * rear_factor, location)) : nil;
 
    reflex update_psychophysiology {
       where_are_they <- bot collect distance_number(each.location);
@@ -235,6 +321,23 @@ species phantom skills: [moving] {
 }
 
    int distance_number(geometry loc) {
+      // Z5: osoba poza kręgiem lampy niewidoczna dalej niż dark_detect_m
+      if (dark_on and (location distance_to loc) > dark_detect_m) {
+         lamp l <- lamp closest_to loc;
+         if (l = nil or (l distance_to loc) > lamp_radius) { return 0; }
+      }
+      // Z4, Z4b: poza stożkiem widzenia (kąt od kierunku ruchu > fov_deg / 2) tylko strefy za plecami
+      if (fov_deg < 360.0 and (location distance_to loc) > 0.0) {
+         float off <- (self towards loc) - heading;
+         off <- abs(off - 360.0 * floor((off + 180.0) / 360.0));
+         if (off > fov_deg / 2.0) {
+            if (rear_intimate_geometry != nil and rear_intimate_geometry covers loc) { return 4; }
+            if (rear_personal_geometry != nil and rear_personal_geometry covers loc) { return 3; }
+            if (rear_social_geometry != nil and rear_social_geometry covers loc) { return 2; }
+            if (rear_public_geometry != nil and rear_public_geometry covers loc) { return 1; }
+            return 0;
+         }
+      }
       if (intimate_perception_geometry covers loc)     { return 4; }
       if (personal_perception_geometry covers loc)   { return 3; }
       if (social_perception_geometry covers loc)   { return 2; }
@@ -287,6 +390,7 @@ species phantom skills: [moving] {
 
 species road {
     rgb color <- rgb(0,0,0) ;
+    string bike_tag <- "";   // Z12: atrybut bicycle (tylko przy bike_paths_only)
 
 	// >>> FEEDBACK: pamięć strachu na odcinku <<<
 	float fear_memory <- 0.0;
@@ -296,6 +400,13 @@ species road {
     	// >>> FEEDBACK: wizualizacja awersji — im więcej strachu, tym bardziej czerwony odcinek <<<
     	draw shape color: rgb(int(min(255.0, 40.0 + fear_memory * 30.0)), 0, 0) width: 2.0;
     	// <<< FEEDBACK
+	}
+}
+
+// Z5: lampa (punkt z pliku lamps_file)
+species lamp {
+	aspect default {
+		draw circle(lamp_radius) color: rgb(255, 230, 120, 60) border: false;
 	}
 }
 
@@ -316,14 +427,40 @@ experiment Hall  type: gui {
 	parameter "Osobna pamięć strachu phantomów" var: individual_fear;
 	parameter "Prędkość po długości (wagi tylko do trasy)" var: move_by_length;
 	// <<< FEEDBACK
+	// >>> PROFILE WIEKU <<<
+	parameter "Prędkość phantoma (km/h)" var: phantom_speed_kmh category: "Populacja";
+	parameter "Średnia prędkość botów (km/h)" var: bot_speed_kmh category: "Populacja";
+	parameter "Odch. std. prędkości botów (m/s)" var: bot_speed_sd category: "Populacja";
+	parameter "Koniec (cykl)" var: end_cycle category: "Przebieg";
+	parameter "Udział starszych pieszych" var: bot_older_share category: "Typy botów";
+	parameter "Mnożnik prędkości starszych" var: bot_older_speed_factor category: "Typy botów";
+	parameter "Udział biegaczy" var: bot_run_share category: "Typy botów";
+	parameter "Prędkość biegaczy (km/h)" var: bot_run_speed_kmh category: "Typy botów";
+	parameter "Odch. std. biegaczy (m/s)" var: bot_run_speed_sd category: "Typy botów";
+	parameter "Udział rowerzystów" var: bot_bike_share category: "Typy botów";
+	parameter "Prędkość rowerzystów (km/h)" var: bot_bike_speed_kmh category: "Typy botów";
+	parameter "Odch. std. rowerzystów (m/s)" var: bot_bike_speed_sd category: "Typy botów";
+	parameter "Rowerzyści tylko na drogach rowerowych" var: bike_paths_only category: "Typy botów";
+	parameter "Kąt stożka widzenia (°)" var: fov_deg category: "Percepcja";
+	parameter "Mnożnik stref za plecami" var: rear_factor category: "Percepcja";
+	parameter "Strefy za plecami (od intymnej)" var: rear_zones category: "Percepcja";
+	parameter "Za plecami maskowanie przeszkodami" var: rear_masked category: "Percepcja";
+	parameter "Ciemność (widać tylko w kręgu lamp)" var: dark_on category: "Ciemność i sezon";
+	parameter "Plik lamp (SHP, punkty)" var: lamps_file category: "Ciemność i sezon";
+	parameter "Promień kręgu lampy (m)" var: lamp_radius category: "Ciemność i sezon";
+	parameter "Wykrycie w ciemności (m)" var: dark_detect_m category: "Ciemność i sezon";
+	parameter "Sezon" var: season among: ["summer", "winter"] category: "Ciemność i sezon";
+	parameter "Zimą udział zasłaniających (bez leaf_cycle)" var: bush_evergreen_share category: "Ciemność i sezon";
+	// <<< PROFILE WIEKU
 
     output {
-        display city_display autosave: cycle=10000 type:opengl {
+        display city_display autosave: cycle=end_cycle type:opengl {
    	        species road  refresh: true;   // >>> FEEDBACK: było false; true, by widzieć narastającą awersję
    	        species obstacle refresh: false;
    	        species phantom aspect: hall;
    	        species phantom aspect: hall2;
    	        species phantom aspect: default;
+   	        species lamp;
    	        species bot;
    	        species fear;
    	    }

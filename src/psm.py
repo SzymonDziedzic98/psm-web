@@ -99,6 +99,31 @@ DEFAULTS = {
     "isovist_spacing": 5.0,        # m, co ile próbkować ścieżki
     "isovist_rays": 72,
     "isovist_radius": None,        # None = strefa publiczna
+    # --- profile wieku, percepcja, ciemność, sezon (gałąź feature/profile-wieku) ---
+    # Wszystkie wartości domyślne dają wynik identyczny z wersją v1.0-ufug (bee3774).
+    # Z3b/Z12: typy botów. Udziały liczone od wszystkich botów (suma <= 1); reszta to piesi jak dotąd.
+    # Losowanie typów osobnym generatorem (seed ^ 0x5EED), więc self.rng i położenia botów się nie zmieniają.
+    "bot_older_share": 0.0,        # starsi piesi
+    "bot_older_speed_factor": 0.85,  # mnożnik prędkości starszego pieszego (0,8–0,9 × dorosły; notatka 3.1)
+    "bot_run_share": 0.0,          # biegacze
+    "bot_run_speed_kmh": 10.0,
+    "bot_run_speed_sd": 0.5,       # m/s
+    "bot_bike_share": 0.0,         # rowerzyści
+    "bot_bike_speed_kmh": 16.0,
+    "bot_bike_speed_sd": 1.0,      # m/s
+    "bike_paths_only": False,      # rowerzyści tylko na ścieżkach z bicycle = yes/designated (albo highway = cycleway)
+    # Z4/Z4b: stożek widzenia phantoma i strefy "za plecami"
+    "fov_deg": 360.0,              # kąt stożka widzenia; 360 = jak dotąd (okręgi)
+    "rear_factor": 1.0,            # mnożnik promieni stref poza stożkiem (Yu i in. 2020: tył ≈ 0,6 przodu)
+    "rear_zones": 4,               # ile stref (od intymnej) istnieje poza stożkiem: 4 = wszystkie, 2 = intymna i osobista, 0 = nic
+    "rear_masked": True,           # poza stożkiem też maskowanie przeszkodami (False: słuch przez krzewy)
+    # Z5: ciemność z lamp
+    "dark_on": False,              # True: bot poza kręgiem lampy niewidoczny dalej niż dark_detect_m
+    "lamp_radius": 10.0,           # m, promień kręgu światła lampy
+    "dark_detect_m": 5.0,          # m, odległość wykrycia osoby w ciemności
+    # Z6: sezon
+    "season": "summer",            # "winter": krzewy liściaste nie zasłaniają
+    "bush_evergreen_share": 1.0,   # zimą: udział zasłaniających przeszkód bez właściwości leaf_cycle
 }
 
 CHOICES = {
@@ -107,6 +132,7 @@ CHOICES = {
     "planting": ["default", "controlled", "none"],
     "bush_form": ["clumps", "band"],
     "bush_setback_scope": ["own", "all"],
+    "season": ["summer", "winter"],
 }
 
 HALL_BASE = {"intimate": 0.45, "personal": 1.2, "social": 3.6, "public": 10.0}
@@ -158,6 +184,30 @@ GUI_PARAMETERS = [
         ("bush_setback_scope", "Odsunięcie od (own = swojego / all = każdego skrzyżowania)"),
         ("junction_zone", "Strefa skrzyżowania (m)"),
     ]),
+    ("Typy botów (profile)", [
+        ("bot_older_share", "Udział starszych pieszych"),
+        ("bot_older_speed_factor", "Mnożnik prędkości starszych"),
+        ("bot_run_share", "Udział biegaczy"),
+        ("bot_run_speed_kmh", "Prędkość biegaczy (km/h)"),
+        ("bot_run_speed_sd", "Odch. std. prędkości biegaczy (m/s)"),
+        ("bot_bike_share", "Udział rowerzystów"),
+        ("bot_bike_speed_kmh", "Prędkość rowerzystów (km/h)"),
+        ("bot_bike_speed_sd", "Odch. std. prędkości rowerzystów (m/s)"),
+        ("bike_paths_only", "Rowerzyści tylko na drogach rowerowych"),
+    ]),
+    ("Percepcja phantoma", [
+        ("fov_deg", "Kąt stożka widzenia (°; 360 = okręgi)"),
+        ("rear_factor", "Mnożnik stref za plecami"),
+        ("rear_zones", "Strefy za plecami (od intymnej; 4 = wszystkie)"),
+        ("rear_masked", "Za plecami maskowanie przeszkodami"),
+    ]),
+    ("Ciemność i sezon", [
+        ("dark_on", "Ciemność (widać tylko w kręgu lamp)"),
+        ("lamp_radius", "Promień kręgu lampy (m)"),
+        ("dark_detect_m", "Wykrycie w ciemności (m)"),
+        ("season", "Sezon (winter = krzewy liściaste nie zasłaniają)"),
+        ("bush_evergreen_share", "Zimą udział zasłaniających (bez leaf_cycle)"),
+    ]),
     ("Przebieg", [
         ("end_cycle", "Koniec (cykl)"),
         ("step_min", "Krok (min)"),
@@ -175,7 +225,10 @@ RESTART_KEYS = {"bot_nb", "phantom_nb", "bot_speed_kmh", "bot_speed_sd", "phanto
                 "park_seed", "park_width", "park_height", "park_bushes", "step_min", "largest_component",
                 "bot_graph", "fear_scope", "planting", "planting_seed", "bush_area_total", "bush_radius",
                 "bush_junction_share", "bush_junction_distance", "bush_path_offset", "junction_zone", "bush_setback_scope",
-                "bush_form", "bush_band_width", "bush_band_length"}
+                "bush_form", "bush_band_width", "bush_band_length",
+                "bot_older_share", "bot_older_speed_factor", "bot_run_share", "bot_run_speed_kmh", "bot_run_speed_sd",
+                "bot_bike_share", "bot_bike_speed_kmh", "bot_bike_speed_sd", "bike_paths_only",
+                "fov_deg", "rear_factor", "rear_zones", "dark_on", "lamp_radius", "season", "bush_evergreen_share"}
 
 
 def resolved_params(params=None):
@@ -193,6 +246,11 @@ def resolved_params(params=None):
     for k, opts in CHOICES.items():
         if p[k] not in opts:
             raise ValueError("%s musi być jednym z %s" % (k, opts))
+    shares = float(p["bot_older_share"]) + float(p["bot_run_share"]) + float(p["bot_bike_share"])
+    if shares > 1.0 + 1e-9:
+        raise ValueError("bot_older_share + bot_run_share + bot_bike_share nie może przekraczać 1")
+    if not 0 <= int(p["rear_zones"]) <= 4:
+        raise ValueError("rear_zones musi być w zakresie 0–4")
     return p
 
 
@@ -322,17 +380,26 @@ def project_lonlat(features, origin=None):
     return [(k, [[((x - lon0) * kx, (y - lat0) * ky) for x, y in part] for part in parts]) for k, parts in features]
 
 
-def geojson_features(obj):
-    """GeoJSON -> lista (rodzaj, części); rodzaj z properties.layer albo z typu geometrii."""
+LAMP_LAYERS = ("lamps", "lamp", "street_lamp")
+BIKE_MATCH_M = 3.0   # m; odcinek sieci jest drogą rowerową, gdy jego środek leży tak blisko linii z bicycle = yes
+
+
+def geojson_features(obj, props=None):
+    """GeoJSON -> lista (rodzaj, części); rodzaj z properties.layer albo z typu geometrii.
+
+    props: lista, do której trafiają właściwości (properties) każdego zwróconego obiektu, równolegle do wyniku.
+    Punkty są zwracane tylko z warstwy lamp (LAMP_LAYERS); pozostałe punkty (np. wejścia) pomija się jak dotąd."""
     feats = obj.get("features", []) if obj.get("type") == "FeatureCollection" else [obj]
     out = []
     for f in feats:
         geom = f.get("geometry") if f.get("type") == "Feature" else f
         if not geom:
             continue
-        layer = (f.get("properties") or {}).get("layer")
+        pr = (f.get("properties") or {}) if f.get("type") == "Feature" else {}
+        layer = pr.get("layer")
         t = geom.get("type")
         c = geom.get("coordinates")
+        n0 = len(out)
         if t == "LineString":
             out.append((layer or "line", [[tuple(p[:2]) for p in c]]))
         elif t == "MultiLineString":
@@ -342,19 +409,49 @@ def geojson_features(obj):
         elif t == "MultiPolygon":
             for poly in c:
                 out.append((layer or "polygon", [[tuple(p[:2]) for p in ring] for ring in poly]))
+        elif t in ("Point", "MultiPoint") and (layer in LAMP_LAYERS or pr.get("highway") == "street_lamp"):
+            pts = [c] if t == "Point" else c
+            for q in pts:
+                out.append(("lamps", [[tuple(q[:2])]]))
+        if props is not None:
+            props.extend([pr] * (len(out) - n0))
     return out
 
 
-def split_layers(features):
+def split_layers(features, props=None, extras=None):
+    """props (równolegle do features) i extras (słownik) są opcjonalne: przy nich do extras trafiają lampy,
+    leaf_cycle każdej przeszkody (Z6) i ścieżki rowerowe (Z12). Bez nich wynik jak dotąd."""
     roads, obstacles, boundary = [], [], []
-    for kind, parts in features:
+    for i, (kind, parts) in enumerate(features):
+        pr = props[i] if props is not None else {}
         if kind in ("roads", "line"):
             roads.extend(parts)
+            if extras is not None and (str(pr.get("bicycle", "")).lower() in ("yes", "designated")
+                                       or pr.get("highway") == "cycleway"):
+                extras.setdefault("bike_lines", []).extend(parts)
         elif kind in ("obstacles", "polygon"):
             obstacles.append(parts)
+            if extras is not None:
+                leaf = pr.get("leaf_cycle")
+                extras.setdefault("obstacle_leaf", []).append(str(leaf).lower() if leaf else None)
         elif kind == "boundary":
             boundary.extend(parts)
+        elif kind == "lamps" and extras is not None:
+            extras.setdefault("lamps", []).extend(part[0] for part in parts)
     return roads, obstacles, boundary
+
+
+class Inputs(tuple):
+    """(roads, obstacles, boundary) z dodatkowym atrybutem extras: lampy, leaf_cycle przeszkód, ścieżki rowerowe.
+    Rozpakowanie na trzy elementy działa jak dla zwykłej krotki."""
+
+    def __new__(cls, roads, obstacles, boundary, extras=None):
+        t = tuple.__new__(cls, (roads, obstacles, boundary))
+        t.extras = extras or {}
+        return t
+
+    def __reduce__(self):
+        return (Inputs, (self[0], self[1], self[2], self.extras))
 
 
 OSM_PATH_TAGS = "footway|path|pedestrian|cycleway|track|steps|living_street|service|bridleway"
@@ -1605,7 +1702,7 @@ class Obstacles:
 # ---------------------------------------------------------------------------
 
 class Mover:
-    __slots__ = ("edge", "s", "loc", "heading", "speed", "target", "target_loc", "route", "route_ver")
+    __slots__ = ("edge", "s", "loc", "heading", "speed", "target", "target_loc", "route", "route_ver", "kind", "odo")
 
     def __init__(self, net, rng, speed):
         self.edge, self.s = net.random_location(rng)
@@ -1615,11 +1712,18 @@ class Mover:
         self.target_loc = self.loc
         self.route = None
         self.route_ver = -1
+        self.kind = "walk"          # typ bota: walk / older / run / bike (Z3b, Z12)
+        self.odo = 0.0              # przebyta droga (m)
 
     def normal_move(self, model):
         # if target distance_to location < 1: nowy cel, w przeciwnym razie goto po road_network
         if dist(self.target_loc, self.loc) < 1.0:
-            self.target = model.net.random_location(model.rng)
+            if self.kind == "bike" and model.bike_edges:
+                # rowerzysta przy bike_paths_only: cel tylko na drodze rowerowej
+                e = model.bike_edges[model.rng.randrange(len(model.bike_edges))]
+                self.target = (e, model.rng.uniform(0.0, e.length))
+            else:
+                self.target = model.net.random_location(model.rng)
             self.target_loc = self.target[0].point_at(self.target[1])[0]
             self.route = None
         else:
@@ -1627,6 +1731,8 @@ class Mover:
 
     def route_weights(self, model):
         # bot: graf ważony (bot_graph = "weighted") albo same długości (bot_graph = "plain", jak GAML domyślnie)
+        if self.kind == "bike" and model.bike_weights is not None:
+            return model.bike_weights
         return model.bot_weights
 
     def goto(self, model):
@@ -1635,7 +1741,7 @@ class Mover:
             self.route_ver = model.graph_version
             if self.route is None:
                 return
-        remaining = self.speed * model.step_s
+        remaining = start = self.speed * model.step_s
         while remaining > 0 and self.route:
             e, s_from, s_to = self.route[0]
             left = abs(s_to - self.s) if e is self.edge else abs(s_to - s_from)
@@ -1652,6 +1758,7 @@ class Mover:
             if e.length:
                 self.loc, h = e.point_at(self.s)
                 self.heading = h if direction > 0 else h + math.pi
+        self.odo += start - remaining
 
 
 class Phantom(Mover):
@@ -1679,7 +1786,15 @@ class Phantom(Mover):
     def distance_number(self, model, q):
         d = dist(self.loc, q)
         p = model.p
+        if model.cone_half is not None:
+            # Z4/Z4b: poza stożkiem widzenia (kąt od kierunku ruchu > fov_deg / 2) liczą się strefy "za plecami"
+            off = abs((math.atan2(q[1] - self.loc[1], q[0] - self.loc[0]) - self.heading + math.pi)
+                      % (2 * math.pi) - math.pi)
+            if off > model.cone_half:
+                return self._rear_number(model, q, d)
         if d > p["public"]:
+            return 0
+        if model.lamps is not None and d > p["dark_detect_m"] and not model.lit(q):
             return 0
         if not model.obstacles.visible(self.loc, q, model._ignore):
             return 0
@@ -1690,6 +1805,21 @@ class Phantom(Mover):
         if d <= p["social"]:
             return 2
         return 1
+
+    def _rear_number(self, model, q, d):
+        """Strefy za plecami: promienie × rear_factor, tylko rear_zones stref od intymnej (Z4b)."""
+        radii = model.rear_radii
+        if not radii or d > radii[-1][1]:
+            return 0
+        p = model.p
+        if model.lamps is not None and d > p["dark_detect_m"] and not model.lit(q):
+            return 0
+        if p["rear_masked"] and not model.obstacles.visible(self.loc, q, model._ignore):
+            return 0
+        for level, r in radii:
+            if d <= r:
+                return level
+        return 0
 
     def required_vigilance(self):
         if not self.where_were_they:
@@ -1739,8 +1869,10 @@ SUMMARY_HEADER = ["bot_nb", "phantom_nb", "total_adrenaline", "total_cortisol", 
 
 
 class Model:
-    def __init__(self, params=None, seed=None, roads=None, obstacles=None, boundary=None):
+    def __init__(self, params=None, seed=None, roads=None, obstacles=None, boundary=None, extras=None):
         self.p = resolved_params(params)
+        if extras is None:
+            extras = getattr(roads, "extras", None) or {}
         self.seed = seed if seed is not None else random.randrange(1 << 30)
         self.rng = random.Random(self.seed)
         p = self.p
@@ -1750,16 +1882,36 @@ class Model:
             self.source = "generated"
         else:
             self.source = "file"
-        roads, obstacles, boundary = self._normalize(roads, obstacles or [], boundary or [])
+        roads, obstacles, boundary, extras = self._normalize(roads, obstacles or [], boundary or [], extras)
+        self.winter_removed = 0
         self.planting_info = {}
         if p["planting"] == "controlled":
             obstacles, self.planting_info = plant_bushes(roads, p)
         elif p["planting"] == "none":
             obstacles = []
+        if p["season"] == "winter":
+            obstacles = self._winter(obstacles, extras.get("obstacle_leaf") if p["planting"] == "default" else None)
         self.boundary = boundary
         self.net = Network(roads, largest_component=bool(p["largest_component"]))
         self.obstacles = Obstacles(obstacles)
         self.bot_weights = None if p["bot_graph"] == "weighted" else self.net.lengths
+        # Z4/Z4b: stożek widzenia; None = okręgi jak dotąd
+        fov = float(p["fov_deg"])
+        self.cone_half = math.radians(fov) / 2 if fov < 360.0 else None
+        rf = float(p["rear_factor"])
+        self.rear_radii = [(lv, p[k] * rf) for lv, k in ((4, "intimate"), (3, "personal"), (2, "social"), (1, "public"))
+                           ][:int(p["rear_zones"])]
+        # Z5: lampy (indeks siatki); None = bez ciemności
+        self.lamps = None
+        self.lamp_points = extras.get("lamps") or []
+        if p["dark_on"]:
+            c = max(float(p["lamp_radius"]), 1e-6)
+            self.lamps = {}
+            for q in self.lamp_points:
+                self.lamps.setdefault((int(math.floor(q[0] / c)), int(math.floor(q[1] / c))), []).append(q)
+        # Z12: drogi rowerowe (bike_paths_only)
+        self.bike_edges = []
+        self.bike_weights = None
         # [cykle phantoma na odcinku, suma adrenaliny, suma czujności, epizody lęku]
         self.edge_stats = [[0, 0.0, 0.0, 0] for _ in self.net.edges]
         self.isovist_edges = None
@@ -1778,17 +1930,89 @@ class Model:
             self.bots.append(Mover(self.net, self.rng, max(0.0, sp)))
         self.phantoms = [Phantom(self.net, self.rng, float(p["phantom_speed_kmh"]) * kmh, float(p["initial_level"]))
                          for _ in range(int(p["phantom_nb"]))]
+        self._assign_bot_types(extras.get("bike_lines") or [])
         self.rebuild_graph()
 
+    def _assign_bot_types(self, bike_lines):
+        """Z3b, Z12: typy botów losowane osobnym generatorem po utworzeniu wszystkich agentów,
+        więc przy udziałach 0 nic się nie losuje, a self.rng zostaje jak dotąd."""
+        p = self.p
+        so, sr, sb = float(p["bot_older_share"]), float(p["bot_run_share"]), float(p["bot_bike_share"])
+        if so + sr + sb <= 0:
+            return
+        kmh = 1000.0 / 3600.0
+        prng = random.Random(self.seed ^ 0x5EED)
+        for b in self.bots:
+            u = prng.random()
+            if u < sr:
+                b.kind = "run"
+                b.speed = max(0.0, float(p["bot_run_speed_kmh"]) * kmh + prng.gauss(0.0, float(p["bot_run_speed_sd"])))
+            elif u < sr + sb:
+                b.kind = "bike"
+                b.speed = max(0.0, float(p["bot_bike_speed_kmh"]) * kmh + prng.gauss(0.0, float(p["bot_bike_speed_sd"])))
+            elif u < sr + sb + so:
+                b.kind = "older"
+                b.speed *= float(p["bot_older_speed_factor"])
+        if sb > 0 and p["bike_paths_only"]:
+            idx = SegIndex(bike_lines, cell=10.0) if bike_lines else None
+            active = {e.id for e in self.net.active}
+            self.bike_edges = [e for e in self.net.edges if e.id in active and idx is not None
+                               and idx.nearest(e.point_at(e.length / 2)[0], limit=5.0) < BIKE_MATCH_M]
+            if self.bike_edges:
+                bike = {e.id for e in self.bike_edges}
+                # poza drogą rowerową waga ×1000: rowerzysta przejedzie tamtędy tylko, gdy nie ma innej drogi
+                self.bike_weights = [L if i in bike else L * 1000.0 for i, L in enumerate(self.net.lengths)]
+                for b in self.bots:
+                    if b.kind == "bike":
+                        e = self.bike_edges[prng.randrange(len(self.bike_edges))]
+                        b.edge, b.s = e, prng.uniform(0.0, e.length)
+                        b.loc, b.heading = e.point_at(b.s)
+                        b.target, b.target_loc, b.route = (e, b.s), b.loc, None
+
+    def _winter(self, obstacles, leafs):
+        """Z6: zimą znikają przeszkody leaf_cycle = deciduous; przeszkody bez leaf_cycle zostają z prawdopodobieństwem
+        bush_evergreen_share (jedno losowanie na przeszkodę z generatora planting_seed, więc położenia są te same
+        co latem, a mniejszy udział to podzbiór większego). Inna wartość leaf_cycle (evergreen, mixed, ...) zostaje."""
+        share = float(self.p["bush_evergreen_share"])
+        wrng = random.Random(int(self.p["planting_seed"]) * 1000003 + 0x317E)
+        keep = []
+        for i, ob in enumerate(obstacles):
+            u = wrng.random()
+            leaf = leafs[i] if leafs and i < len(leafs) else None
+            if leaf == "deciduous":
+                continue
+            if leaf is None and u >= share:
+                continue
+            keep.append(ob)
+        self.winter_removed = len(obstacles) - len(keep)
+        return keep
+
+    def lit(self, q):
+        """Z5: czy punkt jest w kręgu którejś lampy."""
+        r = float(self.p["lamp_radius"])
+        ci, cj = int(math.floor(q[0] / r)), int(math.floor(q[1] / r))
+        for i in (ci - 1, ci, ci + 1):
+            for j in (cj - 1, cj, cj + 1):
+                for L in self.lamps.get((i, j), ()):
+                    if (L[0] - q[0]) ** 2 + (L[1] - q[1]) ** 2 <= r * r:
+                        return True
+        return False
+
     @staticmethod
-    def _normalize(roads, obstacles, boundary):
+    def _normalize(roads, obstacles, boundary, extras=None):
         feats = [("roads", roads)] + [("obstacles", o) for o in obstacles] + [("boundary", boundary)]
         # współrzędne w metrach (stopnie rzutuje wcześniej load_inputs); przesunięcie do (0, 0) jak envelope w GAMA
         pts = [p for _k, parts in feats for part in parts for p in part]
         x0 = min(p[0] for p in pts)
         y0 = min(p[1] for p in pts)
         feats = [(k, [[(x - x0, y - y0) for x, y in part] for part in parts]) for k, parts in feats]
-        return feats[0][1], [f[1] for f in feats[1:-1]], feats[-1][1]
+        # lampy i drogi rowerowe przesunięte o to samo (nie wpływają na x0, y0)
+        ex = dict(extras or {})
+        if ex.get("lamps"):
+            ex["lamps"] = [(x - x0, y - y0) for x, y in ex["lamps"]]
+        if ex.get("bike_lines"):
+            ex["bike_lines"] = [[(x - x0, y - y0) for x, y in part] for part in ex["bike_lines"]]
+        return feats[0][1], [f[1] for f in feats[1:-1]], feats[-1][1], ex
 
     # --- reflexy globalne ---
     def rebuild_graph(self):
@@ -1927,6 +2151,15 @@ class Model:
             "bush_area": round(sum(ring_area(r[0]) for r in self.obstacles.polygons), 1),
             # rozkład stresu w przestrzeni: odchylenie standardowe średniej adrenaliny między odcinkami
             "edge_stress_sd": _sd(stress),
+            # profile wieku: wolniejszy phantom przechodzi mniej, więc porównania na km (propozycje, 3.1)
+            "phantom_km": round(ph.odo / 1000.0, 4) if ph else 0.0,
+            "adrenaline_per_km": ph.total_adrenaline / (ph.odo / 1000.0) if ph and ph.odo > 0 else 0.0,
+            "fear_events_per_km": ph.fear_events / (ph.odo / 1000.0) if ph and ph.odo > 0 else 0.0,
+            "bots_older": sum(1 for b in self.bots if b.kind == "older"),
+            "bots_run": sum(1 for b in self.bots if b.kind == "run"),
+            "bots_bike": sum(1 for b in self.bots if b.kind == "bike"),
+            "n_lamps": len(self.lamp_points),
+            "winter_removed": self.winter_removed,
         }
 
     # --- dane do przeglądarki ---
@@ -1993,55 +2226,88 @@ LOAD_INFO = {}
 
 
 def load_inputs(roads_data=None, obstacles_data=None, roads_name="", obstacles_name="", bridge_gap=None,
-                simplify=None):
-    """Bajty/tekst plików -> (roads, obstacles, boundary). Obsługuje .shp i .geojson/.json.
+                simplify=None, lamps_data=None, lamps_name=""):
+    """Bajty/tekst plików -> Inputs (roads, obstacles, boundary; .extras). Obsługuje .shp i .geojson/.json.
 
     bridge_gap: łączenie rozłącznych części sieci (m); domyślnie OSM_BRIDGE_GAP dla danych z Overpass
-    i GeoJSON (zwykle wyeksportowanych z OSM), 0 dla SHP (schematy A/B mają zostać jak w GAMA)."""
+    i GeoJSON (zwykle wyeksportowanych z OSM), 0 dla SHP (schematy A/B mają zostać jak w GAMA).
+    lamps_data: osobny plik lamp (.shp z punktami albo GeoJSON; każdy punkt to lampa). Lampy mogą też być
+    warstwą "lamps" w pliku ścieżek albo przeszkód. extras: "lamps" (punkty), "obstacle_leaf" (leaf_cycle każdej
+    przeszkody albo None), "bike_lines" (ścieżki z bicycle = yes/designated przed poprawkami sieci)."""
     roads, obstacles, boundary = [], [], []
     is_osm = []
     marks = []
 
-    def feats_of(data, name):
+    def feats_of(data, name, all_points_lamps=False):
+        props = []
         if name.lower().endswith(".shp"):
-            return [("roads" if k == "line" else "obstacles" if k == "polygon" else "point", parts)
-                    for k, parts in read_shp(bytes(data))]
+            out = [("roads" if k == "line" else "obstacles" if k == "polygon" else
+                    ("lamps" if all_points_lamps else "point"), parts) for k, parts in read_shp(bytes(data))]
+            return out, [{}] * len(out)
         text = data.decode("utf-8") if isinstance(data, (bytes, bytearray)) else data
         obj = json.loads(text)
         if obj.get(PROCESSED_MARK):
             marks.append(obj[PROCESSED_MARK])
         if obj.get("elements") is not None:
             is_osm.append(True)
-            return osm_to_features(obj)
+            out = osm_to_features(obj)
+            return out, [{}] * len(out)
         is_osm.append(True)
-        return geojson_features(obj)
+        if all_points_lamps:
+            # plik lamp: każdy punkt jest lampą, niezależnie od warstwy
+            out = []
+            for f in (obj.get("features", []) if obj.get("type") == "FeatureCollection" else [obj]):
+                g = f.get("geometry") if f.get("type") == "Feature" else f
+                if g and g.get("type") == "Point":
+                    out.append(("lamps", [[tuple(g["coordinates"][:2])]]))
+                elif g and g.get("type") == "MultiPoint":
+                    out += [("lamps", [[tuple(q[:2])]]) for q in g["coordinates"]]
+            return out, [{}] * len(out)
+        out = geojson_features(obj, props)
+        return out, props
 
-    feats = []
+    feats, props = [], []
     if roads_data is not None:
-        feats += feats_of(roads_data, roads_name)
+        f, pr = feats_of(roads_data, roads_name)
+        feats += f
+        props += pr
     if obstacles_data is not None:
         # w pliku przeszkód linie też są przeszkodami (np. żywopłoty)
-        for k, parts in feats_of(obstacles_data, obstacles_name):
+        f, pr = feats_of(obstacles_data, obstacles_name)
+        for (k, parts), q in zip(f, pr):
             if k in ("line", "roads"):
                 for part in parts:
                     feats.append(("obstacles", [part + part[::-1][1:]]))
+                    props.append(q)
             elif k != "point":
-                feats.append(("obstacles", parts))
+                feats.append(("obstacles" if k != "lamps" else k, parts))
+                props.append(q)
+    if lamps_data is not None:
+        is_osm_before = list(is_osm)
+        f, pr = feats_of(lamps_data, lamps_name, all_points_lamps=True)
+        is_osm[:] = is_osm_before   # plik lamp nie zmienia obróbki sieci
+        feats += f
+        props += pr
+    # lampy nie wpływają na wykrycie stopni, środek rzutu ani przesunięcie do (0, 0): wynik bez lamp jak dotąd
+    core = [ft for ft in feats if ft[0] != "lamps"]
     origin = None
-    if feats and looks_geographic([p for _k, parts in feats for part in parts for p in part]):
+    if core and looks_geographic([p for _k, parts in core for part in parts for p in part]):
         # plik po poprawkach: ten sam punkt rzutu co przy jego zapisie
-        origin = tuple(marks[0]["origin"]) if marks and marks[0].get("origin") else lonlat_origin(feats)
+        origin = tuple(marks[0]["origin"]) if marks and marks[0].get("origin") else lonlat_origin(core)
         feats = project_lonlat(feats, origin)
-    roads, obstacles, boundary = split_layers(feats)
+    extras = {}
+    roads, obstacles, boundary = split_layers(feats, props, extras)
     if not roads:
         raise ValueError("w danych nie ma ścieżek (linii)")
     LOAD_INFO.clear()
     LOAD_INFO["origin"] = origin
+    if extras.get("lamps"):
+        LOAD_INFO["lamps"] = len(extras["lamps"])
     if marks:
         # sieć już poprawiona (processed_geojson): druga obróbka zmieniłaby ją
         LOAD_INFO["processed"] = True
         LOAD_INFO["parts_before"] = LOAD_INFO["parts_after"] = len(set(_road_components(roads)))
-        return roads, obstacles, boundary
+        return Inputs(roads, obstacles, boundary, extras)
     gap = (OSM_BRIDGE_GAP if is_osm else 0.0) if bridge_gap is None else bridge_gap
     LOAD_INFO["parts_before"] = len(set(_road_components(roads)))
     if gap > 0 and LOAD_INFO["parts_before"] > 1:
@@ -2055,17 +2321,20 @@ def load_inputs(roads_data=None, obstacles_data=None, roads_name="", obstacles_n
             roads, LOAD_INFO["dead_ends_cut"], LOAD_INFO["dead_ends_cut_m"] = prune_dead_ends(roads, OSM_PRUNE_DEAD_END, boundary)
             LOAD_INFO["exits_trimmed"] = prune_dead_ends.trimmed
         LOAD_INFO["parts_after"] = len(set(_road_components(roads)))
-    return roads, obstacles, boundary
+    return Inputs(roads, obstacles, boundary, extras)
 
 
-def load_files(roads_path, obstacles_path=None):
+def load_files(roads_path, obstacles_path=None, lamps_path=None):
     with open(roads_path, "rb") as f:
         rd = f.read()
-    od = None
+    od = ld = None
     if obstacles_path:
         with open(obstacles_path, "rb") as f:
             od = f.read()
-    return load_inputs(rd, od, roads_path, obstacles_path or "")
+    if lamps_path:
+        with open(lamps_path, "rb") as f:
+            ld = f.read()
+    return load_inputs(rd, od, roads_path, obstacles_path or "", lamps_data=ld, lamps_name=lamps_path or "")
 
 
 # ---------------------------------------------------------------------------
@@ -2088,6 +2357,8 @@ SENS_PARAMS = {
     "fear_decay": (0.995, 0.9999),
     "bot_nb": (40, 120),
 }
+# dodatkowe kolumny (--per-km), poza OUTPUTS, żeby domyślne pliki wyników miały te same kolumny co dotąd
+PER_KM_OUTPUTS = ["phantom_km", "adrenaline_per_km", "fear_events_per_km"]
 RATE_PARAMS = {"adrenaline_cooldown", "cortisol_cooldown", "fear_decay"}
 
 
@@ -2163,16 +2434,17 @@ def make_model(overrides, seed, cycles, params=None, inputs=None):
     pp.update(overrides)
     pp["end_cycle"] = cycles
     if inputs:
-        return Model(pp, seed=seed, roads=inputs[0], obstacles=inputs[1], boundary=inputs[2])
+        return Model(pp, seed=seed, roads=inputs[0], obstacles=inputs[1], boundary=inputs[2],
+                     extras=getattr(inputs, "extras", None))
     return Model(pp, seed=seed)
 
 
-def result_row(i, model, overrides, label="", isovist=False):
+def result_row(i, model, overrides, label="", isovist=False, per_km=False):
     m = model.metrics()
     row = {"run": i, "seed": model.seed, "label": label, "cycles": model.cycle}
     for k in sorted(overrides):
         row[k] = overrides[k]
-    for k in OUTPUTS:
+    for k in OUTPUTS + (PER_KM_OUTPUTS if per_km else []):
         v = m[k]
         row[k] = round(v, 4) if isinstance(v, float) else v
     if model.planting_info:
@@ -2189,14 +2461,15 @@ def result_row(i, model, overrides, label="", isovist=False):
 
 
 def _run_one(job):
-    i, overrides, seed, label, cycles, params, inputs, isovist = job
+    i, overrides, seed, label, cycles, params, inputs, isovist = job[:8]
+    per_km = job[8] if len(job) > 8 else False
     model = make_model(overrides, seed, cycles, params, inputs).run()
-    return result_row(i, model, overrides, label, isovist)
+    return result_row(i, model, overrides, label, isovist, per_km)
 
 
-def run_plan(plan, cycles=3000, params=None, inputs=None, progress=None, jobs=1, isovist=False):
+def run_plan(plan, cycles=3000, params=None, inputs=None, progress=None, jobs=1, isovist=False, per_km=False):
     """Uruchamia plan; jobs > 1 = procesy równoległe (tylko CPython, nie w przeglądarce)."""
-    work = [(i, o, s, l, cycles, params, inputs, isovist) for i, (o, s, l) in enumerate(plan)]
+    work = [(i, o, s, l, cycles, params, inputs, isovist, per_km) for i, (o, s, l) in enumerate(plan)]
     rows = []
     if jobs and jobs > 1:
         import multiprocessing as mp
@@ -2881,6 +3154,157 @@ def test_run_plan_rows():
     assert len(summ) == 2 and summ[0]["n"] == 1
 
 
+# --- profile wieku, percepcja, ciemność, sezon (feature/profile-wieku) ---
+
+def test_new_defaults_do_not_change_run():
+    # wartości domyślne nowych parametrów = przebieg identyczny z przebiegiem bez nich
+    a = Model({"end_cycle": 400}, seed=3).run()
+    neutral = {"end_cycle": 400, "fov_deg": 360.0, "rear_factor": 0.6, "rear_zones": 2, "dark_on": False,
+               "season": "summer", "bot_older_share": 0.0, "bot_run_share": 0.0, "bot_bike_share": 0.0,
+               "bike_paths_only": True}
+    b = Model(neutral, seed=3).run()
+    assert a.history == b.history and [bt.loc for bt in a.bots] == [bt.loc for bt in b.bots]
+
+
+def test_bot_types_shares_and_speeds():
+    m = Model({"bot_nb": 400, "bot_older_share": 0.25, "bot_run_share": 0.25, "bot_bike_share": 0.25,
+               "end_cycle": 10}, seed=5)
+    kinds = [b.kind for b in m.bots]
+    for k in ("walk", "older", "run", "bike"):
+        assert 60 < kinds.count(k) < 140, (k, kinds.count(k))
+    mean = lambda k: sum(b.speed for b in m.bots if b.kind == k) / kinds.count(k)
+    assert mean("bike") > mean("run") > mean("walk") > mean("older")
+    assert abs(mean("older") / mean("walk") - 0.85) < 0.08
+    # te same położenia startowe co bez typów (osobny generator), poza rowerzystami przy bike_paths_only
+    m0 = Model({"bot_nb": 400, "end_cycle": 10}, seed=5)
+    assert [b.loc for b in m.bots] == [b.loc for b in m0.bots]
+    assert m.phantoms[0].loc == m0.phantoms[0].loc
+
+
+def test_bike_paths_only_keeps_bikes_on_bike_edges():
+    fc = {"type": "FeatureCollection", "features": [
+        {"type": "Feature", "properties": {"bicycle": "designated"},
+         "geometry": {"type": "LineString", "coordinates": [[0, 0], [100, 0]]}},
+        {"type": "Feature", "properties": {"bicycle": "designated"},
+         "geometry": {"type": "LineString", "coordinates": [[100, 0], [100, 100]]}},
+        {"type": "Feature", "properties": {},
+         "geometry": {"type": "LineString", "coordinates": [[0, 0], [0, 100]]}},
+        {"type": "Feature", "properties": {},
+         "geometry": {"type": "LineString", "coordinates": [[0, 100], [100, 100]]}}]}
+    inp = load_inputs(json.dumps(fc), None, "p.geojson", simplify=False)
+    assert len(inp.extras["bike_lines"]) == 2
+    m = Model({"bot_nb": 20, "phantom_nb": 0, "bot_bike_share": 1.0, "bike_paths_only": True, "end_cycle": 3000},
+              seed=2, roads=inp[0], obstacles=inp[1], boundary=inp[2], extras=inp.extras)
+    bike = {e.id for e in m.bike_edges}
+    assert len(bike) == 2
+    for _ in range(1500):
+        m.step()
+        for b in m.bots:
+            assert b.edge.id in bike, b.edge.id
+
+
+def test_cone_rear_zones():
+    m = _tiny_model({"fov_deg": 180.0, "rear_factor": 0.6, "rear_zones": 2})
+    ph = m.phantoms[0]
+    ph.loc, ph.heading = (50.0, 50.0), 0.0      # idzie w stronę +x
+    m._ignore = set()
+    # z przodu jak dotąd
+    assert ph.distance_number(m, (51.0, 50.0)) == 4
+    assert ph.distance_number(m, (80.0, 50.0)) == 1
+    # z tyłu: intymna 1,8 × 0,6 = 1,08 m, osobista 4,8 × 0,6 = 2,88 m, dalej nic
+    assert ph.distance_number(m, (49.0, 50.0)) == 4
+    assert ph.distance_number(m, (48.0, 50.0)) == 3
+    assert ph.distance_number(m, (45.0, 50.0)) == 0
+    assert ph.distance_number(m, (20.0, 50.0)) == 0
+    # dokładnie z boku (90°) jeszcze w stożku 180°
+    assert ph.distance_number(m, (50.0, 80.0)) == 1
+    # rear_zones = 0: czysty stożek (Z4)
+    m0 = _tiny_model({"fov_deg": 180.0, "rear_zones": 0})
+    q = m0.phantoms[0]
+    q.loc, q.heading = (50.0, 50.0), math.pi
+    m0._ignore = set()
+    assert q.distance_number(m0, (51.0, 50.0)) == 0 and q.distance_number(m0, (49.0, 50.0)) == 4
+
+
+def test_rear_masked_switch():
+    bush = [[(47.5, 49), (48.0, 49), (48.0, 51), (47.5, 51), (47.5, 49)]]
+    for masked, want in ((True, 0), (False, 3)):
+        m = _tiny_model({"fov_deg": 180.0, "rear_factor": 0.6, "rear_zones": 2, "rear_masked": masked},
+                        obstacles=[bush])
+        ph = m.phantoms[0]
+        ph.loc, ph.heading = (50.0, 50.0), 0.0
+        m._ignore = set()
+        assert ph.distance_number(m, (47.2, 50.0)) == want, masked
+
+
+def test_darkness_from_lamps():
+    m = Model({"bot_nb": 0, "phantom_nb": 1, "dark_on": True, "lamp_radius": 10.0, "dark_detect_m": 5.0},
+              seed=1, roads=_square_net(), obstacles=[], boundary=[], extras={"lamps": [(80.0, 50.0)]})
+    ph = m.phantoms[0]
+    ph.loc = (50.0, 50.0)
+    m._ignore = set()
+    assert ph.distance_number(m, (75.0, 50.0)) == 1      # w kręgu lampy: widoczny
+    assert ph.distance_number(m, (50.0, 70.0)) == 0      # w ciemności, dalej niż 5 m: niewidoczny
+    assert ph.distance_number(m, (50.0, 54.0)) == 3      # w ciemności, ale bliżej niż 5 m
+    # bez lamp przy dark_on = pełna ciemność poza dark_detect_m
+    m2 = Model({"bot_nb": 0, "phantom_nb": 1, "dark_on": True}, seed=1, roads=_square_net(), obstacles=[], boundary=[])
+    ph2 = m2.phantoms[0]
+    ph2.loc = (50.0, 50.0)
+    m2._ignore = set()
+    assert ph2.distance_number(m2, (50.0, 60.0)) == 0 and ph2.distance_number(m2, (50.0, 53.0)) == 3
+
+
+def test_lamps_layer_loaded_and_shifted():
+    fc = {"type": "FeatureCollection", "features": [
+        {"type": "Feature", "properties": {}, "geometry": {"type": "LineString", "coordinates": [[10, 10], [110, 10]]}},
+        {"type": "Feature", "properties": {"layer": "lamps"}, "geometry": {"type": "Point", "coordinates": [60, 12]}},
+        {"type": "Feature", "properties": {"layer": "entrances"}, "geometry": {"type": "Point", "coordinates": [10, 10]}}]}
+    inp = load_inputs(json.dumps(fc), None, "p.geojson", simplify=False)
+    assert inp.extras["lamps"] == [(60, 12)]
+    r, o, b = inp                       # rozpakowanie jak dotąd
+    m = Model({"bot_nb": 0, "dark_on": True}, seed=1, roads=r, obstacles=o, boundary=b, extras=inp.extras)
+    assert m.lamp_points == [(50, 2)]   # przesunięte razem z siecią do (0, 0)
+    # osobny plik lamp (wszystkie punkty to lampy)
+    lamps = {"type": "FeatureCollection", "features": [
+        {"type": "Feature", "properties": {}, "geometry": {"type": "MultiPoint", "coordinates": [[20, 10], [30, 10]]}}]}
+    inp2 = load_inputs(json.dumps(fc), None, "p.geojson", simplify=False, lamps_data=json.dumps(lamps), lamps_name="l.geojson")
+    assert len(inp2.extras["lamps"]) == 3
+
+
+def test_winter_removes_deciduous_and_share():
+    sq = lambda x: [[(x, 20), (x + 2, 20), (x + 2, 22), (x, 22), (x, 20)]]
+    fc = {"type": "FeatureCollection", "features": [
+        {"type": "Feature", "properties": {}, "geometry": {"type": "LineString", "coordinates": [[0, 0], [200, 0]]}}] + [
+        {"type": "Feature", "properties": {"layer": "obstacles", "leaf_cycle": lc},
+         "geometry": {"type": "Polygon", "coordinates": sq(10 * i)}}
+        for i, lc in enumerate(["deciduous", "evergreen", "deciduous", None])]}
+    for f in fc["features"]:
+        if f["properties"].get("leaf_cycle", 1) is None:
+            del f["properties"]["leaf_cycle"]
+    inp = load_inputs(json.dumps(fc), None, "p.geojson", simplify=False)
+    assert inp.extras["obstacle_leaf"] == ["deciduous", "evergreen", "deciduous", None]
+    mk = lambda pp: Model(dict({"bot_nb": 0}, **pp), seed=1, roads=inp[0], obstacles=inp[1], boundary=inp[2],
+                          extras=inp.extras)
+    assert len(mk({}).obstacles.polygons) == 4
+    assert len(mk({"season": "winter"}).obstacles.polygons) == 2          # bez leaf_cycle zostaje (udział 1)
+    assert len(mk({"season": "winter", "bush_evergreen_share": 0.0}).obstacles.polygons) == 1
+    # kontrolowane nasadzenia: zimą podzbiór tych samych krzewów
+    s = Model({"planting": "controlled", "bot_nb": 0}, seed=1)
+    w = Model({"planting": "controlled", "bot_nb": 0, "season": "winter", "bush_evergreen_share": 0.4}, seed=1)
+    keep = {tuple(r[0][0]) for r in w.obstacles.polygons}
+    assert keep <= {tuple(r[0][0]) for r in s.obstacles.polygons}
+    assert 0.2 < len(w.obstacles.polygons) / len(s.obstacles.polygons) < 0.6
+
+
+def test_per_km_metrics():
+    m = Model({"end_cycle": 300}, seed=1).run()
+    km = m.metrics()["phantom_km"]
+    assert abs(km - 300 * 0.3 * 4 / 3.6 / 1000) < 0.01, km
+    rows = run_plan(batch_plan({"phantom_speed_kmh": [3.4]}, 1, 1), cycles=100, per_km=True)
+    assert "adrenaline_per_km" in rows[0]
+    assert "adrenaline_per_km" not in run_plan(batch_plan({"bot_nb": [10]}, 1, 1), cycles=50)[0]
+
+
 TESTS = [(name, fn) for name, fn in sorted(globals().items()) if name.startswith("test_") and callable(fn)]
 
 
@@ -2951,6 +3375,9 @@ def main(argv):
     ap.add_argument("--out", default="park.geojson")
     ap.add_argument("--roads", help="plik ścieżek: .shp, .geojson albo odpowiedź Overpass .json")
     ap.add_argument("--obstacles", help="plik przeszkód: .shp albo .geojson")
+    ap.add_argument("--lamps", help="plik lamp (punkty): .shp albo .geojson (Z5, dark_on)")
+    ap.add_argument("--per-km", action="store_true",
+                    help="eksperymenty: dodaj kolumny przebytej drogi phantoma i stresu na km (profile wieku)")
     ap.add_argument("--cycles", type=int, default=None)
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--sweep", action="append", default=[], metavar="PARAM=W1,W2",
@@ -3002,13 +3429,13 @@ def main(argv):
               (a.out, len(roads), len(obstacles), len(junctions(roads))))
         return 0
 
-    inputs = load_files(a.roads, a.obstacles) if a.roads else None
+    inputs = load_files(a.roads, a.obstacles, a.lamps) if a.roads else None
     prog = lambda i, n: print("\r%d/%d" % (i, n), end="", file=sys.stderr)
 
     if a.run:
         if a.cycles:
             params["end_cycle"] = a.cycles
-        kw = dict(roads=inputs[0], obstacles=inputs[1], boundary=inputs[2]) if inputs else {}
+        kw = dict(roads=inputs[0], obstacles=inputs[1], boundary=inputs[2], extras=inputs.extras) if inputs else {}
         m = Model(params, seed=a.seed, **kw)
         t = time.time()
         m.run()
@@ -3051,7 +3478,7 @@ def main(argv):
             plan = oat_plan(a.params.split(",") if a.params else None, a.delta, a.repeat, a.seed, params)
         else:
             plan = lhs_plan(a.params.split(",") if a.params else None, a.samples, a.seed)
-        rows = run_plan(plan, cycles, params, inputs, prog, a.jobs, a.isovist)
+        rows = run_plan(plan, cycles, params, inputs, prog, a.jobs, a.isovist, a.per_km)
         print(file=sys.stderr)
         if a.csv:
             _write(a.csv, dict_rows_csv(rows))
