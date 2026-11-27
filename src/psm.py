@@ -2089,12 +2089,32 @@ def _project_on_edge(e, q):
     return bs
 
 
-def _sfm_register(model, a, e):
+def _seg_seg_dist(a, b, c, d):
+    def orient(p, q, r):
+        return (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])
+    o1, o2, o3, o4 = orient(a, b, c), orient(a, b, d), orient(c, d, a), orient(c, d, b)
+    if ((o1 > 0) != (o2 > 0)) and ((o3 > 0) != (o4 > 0)) and o1 * o2 < 0 and o3 * o4 < 0:
+        return 0.0
+    return min(_point_seg_dist(a, c, d), _point_seg_dist(b, c, d), _point_seg_dist(c, a, b), _point_seg_dist(d, a, b))
+
+
+def _polyline_dist(P, Q):
+    return min(_seg_seg_dist(P[i], P[i + 1], Q[j], Q[j + 1]) for i in range(len(P) - 1) for j in range(len(Q) - 1))
+
+
+def _sfm_register(model, a, e, place=False):
+    """PedestrianRoadSkill.register/unregister; place = True: jak w GAMA przy przejściu na kolejny punkt trasy
+    agent spoza wolnej przestrzeni nowego odcinka trafia do najbliższego jej punktu."""
     if a.road is not None:
         model.on_edge[a.road.id].discard(a)
     a.road = e
     if e is not None:
         model.on_edge[e.id].add(a)
+        if place and not _in_free_space(model, e, a.loc):
+            q = _closest_in_free_space(model, e, a.loc)
+            if not model.p["hard_core"] or _hard_block(a, a.loc, q, _core_near(model, a.loc, 2.0),
+                                                       float(model.p["shoulder_length"])) is None:
+                a.loc = q
 
 
 def sfm_virtual_path(model, a):
@@ -2119,8 +2139,8 @@ def sfm_virtual_path(model, a):
     _sfm_register(model, a, wps[0][1])
     if not _in_free_space(model, wps[0][1], a.loc):
         q = _closest_in_free_space(model, wps[0][1], a.loc)
-        near = _sfm_neighbors(model, a, wps[0][1])
-        if not model.p["hard_core"] or _hard_block(a, a.loc, q, near, float(model.p["shoulder_length"])) is None:
+        if not model.p["hard_core"] or _hard_block(a, a.loc, q, _core_near(model, a.loc, 2.0),
+                                                   float(model.p["shoulder_length"])) is None:
             a.loc = q
 
 
@@ -2129,6 +2149,12 @@ def _sfm_neighbors(model, a, e):
     for eid in model.linked[e.id]:
         out.extend(model.on_edge[eid])
     return out
+
+
+def _core_near(model, loc, r):
+    """Twardy rdzeń sprawdza wszystkich agentów w promieniu r (zapytanie przestrzenne, jak at_distance w GAMA),
+    niezależnie od rejestracji na odcinkach, która decyduje tylko o siłach."""
+    return [o for o in model.walkers if abs(o.loc[0] - loc[0]) <= r and abs(o.loc[1] - loc[1]) <= r]
 
 
 def _hard_block(a, loc, new, near, sh):
@@ -2164,11 +2190,23 @@ def _sidestep(model, a, e, loc, new, blk, near, sh):
 
 
 def sfm_walk(model, a):
-    """PedestrianSkill.walk + walkWithForceModel (avoid_other = true, bez przeszkód: ściany = obrys ścieżki).
-    Twardy rdzeń (hard_core): ruch, po którym ciało jest bliżej niż shoulder_length od innego i bliżej niż przed
-    ruchem, jest odrzucany."""
+    """Krok w przestrzeni ścieżki; przy hard_core na końcu ta sama kontrola, co w GAML po do walk: jeśli cały krok
+    zbliżył ciało na mniej niż shoulder_length do kogoś (i bliżej niż przed krokiem), agent wraca na start."""
     if not a.wps:
         return
+    start = a.loc
+    _sfm_walk(model, a)
+    if model.p["hard_core"] and a.loc != start:
+        sh = float(model.p["shoulder_length"])
+        if _hard_block(a, start, a.loc, _core_near(model, start, sh + dist(start, a.loc)), sh) is not None:
+            a.odo -= dist(start, a.loc)
+            a.loc, a.vel = start, (0.0, 0.0)
+
+
+def _sfm_walk(model, a):
+    """PedestrianSkill.walk + walkWithForceModel (avoid_other = true, bez przeszkód: ściany = obrys ścieżki).
+    Twardy rdzeń (hard_core): ruch, po którym ciało jest bliżej niż shoulder_length od innego i bliżej niż przed
+    ruchem, jest zastępowany krokiem w bok (_sidestep) albo odrzucany."""
     p = model.p
     max_dist = a.speed * model.step_s
     tol = float(p["waypoint_tolerance"])
@@ -2193,9 +2231,10 @@ def sfm_walk(model, a):
                 new = _closest_in_free_space(model, e, new)
             accept = model.walk_rng.random() >= 1.0 - pdet or dist(new, target) <= dist(loc, target)
             if accept and p["hard_core"]:
-                blk = _hard_block(a, loc, new, near, sh)
+                core = _core_near(model, loc, sh + max_dist)
+                blk = _hard_block(a, loc, new, core, sh)
                 if blk is not None:
-                    new = _sidestep(model, a, e, loc, new, blk, near, sh)
+                    new = _sidestep(model, a, e, loc, new, blk, core, sh)
                     accept = new is not None
             if accept:
                 a.vel = (new[0] - loc[0], new[1] - loc[1])
@@ -2209,7 +2248,7 @@ def sfm_walk(model, a):
         if dist(a.loc, target) <= tol:
             if a.wpi < len(a.wps) - 1:
                 a.wpi += 1
-                _sfm_register(model, a, a.wps[a.wpi][1])
+                _sfm_register(model, a, a.wps[a.wpi][1], place=True)
                 max_dist -= dist(a.loc, prev)
                 if max_dist > 0:
                     continue
@@ -2342,14 +2381,54 @@ class Model:
                 best = min(((ix.nearest(mid, limit=5.0), w) for ix, w in idxs), default=(9e9, w0))
                 if best[0] < BIKE_MATCH_M:
                     self.edge_half[e.id] = best[1] / 2.0
-        self.linked = [sorted({o.id for o in self.net.adj[e.a] + self.net.adj[e.b]}) for e in self.net.edges]
+        self.linked = self._linked_edges()
         self.on_edge = [set() for _ in self.net.edges]
         self.walk_rng = random.Random(self.seed ^ 0x5F3)   # proba_detour, osobny generator
+        self.walkers = self.bots + self.phantoms
         # start w losowym miejscu przekroju ścieżki (na osi wszyscy szliby gęsiego i zderzali się czołowo)
+        # (do 20 prób, by nie zacząć bliżej niż shoulder_length od już ustawionych)
+        sh = float(p["shoulder_length"])
+        placed = []
         for a in self.bots + self.phantoms:
-            h = max(0.0, self.edge_half[a.edge.id] - float(p["shoulder_length"]) / 2.0)
-            off = self.walk_rng.uniform(-h, h)
-            a.loc = (a.loc[0] - math.sin(a.heading) * off, a.loc[1] + math.cos(a.heading) * off)
+            h = max(0.0, self.edge_half[a.edge.id] - sh / 2.0)
+            base = a.loc
+            for _ in range(20):
+                off = self.walk_rng.uniform(-h, h)
+                a.loc = (base[0] - math.sin(a.heading) * off, base[1] + math.cos(a.heading) * off)
+                if all(dist(a.loc, q) >= sh for q in placed):
+                    break
+            placed.append(a.loc)
+
+    def _linked_edges(self):
+        """Jak build_intersection_areas w GAMA: odcinki, których wolne przestrzenie (bufory o połowie szerokości)
+        się przecinają, łącznie z samym odcinkiem."""
+        E = self.net.edges
+        box = []
+        for e in E:
+            xs, ys, h = [q[0] for q in e.pts], [q[1] for q in e.pts], self.edge_half[e.id]
+            box.append((min(xs) - h, min(ys) - h, max(xs) + h, max(ys) + h))
+        cell = 20.0
+        grid = {}
+        for i, b in enumerate(box):
+            for gx in range(int(math.floor(b[0] / cell)), int(math.floor(b[2] / cell)) + 1):
+                for gy in range(int(math.floor(b[1] / cell)), int(math.floor(b[3] / cell)) + 1):
+                    grid.setdefault((gx, gy), []).append(i)
+        out = [{i} for i in range(len(E))]
+        seen = set()
+        for ids in grid.values():
+            for x in range(len(ids)):
+                for y in range(x + 1, len(ids)):
+                    i, j = ids[x], ids[y]
+                    if (i, j) in seen:
+                        continue
+                    seen.add((i, j))
+                    bi, bj = box[i], box[j]
+                    if bi[0] > bj[2] or bj[0] > bi[2] or bi[1] > bj[3] or bj[1] > bi[3]:
+                        continue
+                    if _polyline_dist(E[i].pts, E[j].pts) <= self.edge_half[i] + self.edge_half[j]:
+                        out[i].add(j)
+                        out[j].add(i)
+        return [sorted(o) for o in out]
 
     def _winter(self, obstacles, leafs):
         """Z6: zimą znikają przeszkody leaf_cycle = deciduous; przeszkody bez leaf_cycle zostają z prawdopodobieństwem
@@ -3795,7 +3874,7 @@ def test_sfm_run_stays_in_path_and_hard_core():
                          - m.edge_half[f.id] for f in (m.net.edges[i] for i in m.linked[e.id]))
                 assert ex <= 1e-6, ex
             dmin = min(dist(ag[i].loc, ag[j].loc) for i in range(len(ag)) for j in range(i + 1, len(ag)))
-            assert dmin >= sh - 0.05, dmin
+            assert dmin >= sh - 1e-9, dmin
     mt = m.metrics()
     assert mt["phantom_km"] > 0.15 and sum(mt["jumps_%d" % i] for i in range(1, 5)) > 0
 
