@@ -122,6 +122,9 @@ DEFAULTS = {
     "turn_rate_dps": 0.0,          # °/s, maks. szybkość obrotu spojrzenia ku kierunkowi ruchu; 0 = natychmiast (jak ruch)
     "scan_amp_deg": 0.0,           # °, amplituda rozglądania się wokół kierunku spojrzenia; 0 = bez rozglądania
     "scan_period_s": 4.0,          # s, okres rozglądania się (sinusoida, losowa faza dla każdego phantoma)
+    # Z4d: pamięć widzianych osób. Bot niewidoczny (poza stożkiem, za przeszkodą, w ciemności) przez memory_s sekund
+    # od ostatniego zobaczenia zachowuje ostatnią strefę, więc stres daje tylko wzrost ponad nią. 0 = bez pamięci (jak dotąd).
+    "memory_s": 0.0,
     # Z5: ciemność z lamp
     "dark_on": False,              # True: bot poza kręgiem lampy niewidoczny dalej niż dark_detect_m
     "lamp_radius": 10.0,           # m, promień kręgu światła lampy
@@ -208,6 +211,7 @@ GUI_PARAMETERS = [
         ("turn_rate_dps", "Szybkość obrotu spojrzenia (°/s; 0 = natychmiast)"),
         ("scan_amp_deg", "Rozglądanie się: amplituda (°; 0 = brak)"),
         ("scan_period_s", "Rozglądanie się: okres (s)"),
+        ("memory_s", "Pamięć widzianych osób (s; 0 = brak)"),
     ]),
     ("Ciemność i sezon", [
         ("dark_on", "Ciemność (widać tylko w kręgu lamp)"),
@@ -1772,7 +1776,7 @@ class Mover:
 class Phantom(Mover):
     __slots__ = ("vigilance", "adrenaline", "cortisol", "total_adrenaline", "total_cortisol",
                  "total_vigilance", "where_are_they", "where_were_they", "fear_events", "fear", "weights",
-                 "gaze", "look", "scan_phase")
+                 "gaze", "look", "scan_phase", "mem_level", "mem_cycle")
 
     def __init__(self, net, rng, speed, level):
         Mover.__init__(self, net, rng, speed)
@@ -1790,6 +1794,8 @@ class Phantom(Mover):
         self.gaze = None        # kierunek spojrzenia (rad), Z4c; None = jeszcze nie ustawiony
         self.look = self.heading
         self.scan_phase = 0.0
+        self.mem_level = None   # Z4d: ostatnia widziana strefa każdego bota
+        self.mem_cycle = None   # Z4d: cykl, w którym bot był ostatnio widziany
 
     def route_weights(self, model):
         # phantom: wspólny graf albo własne wagi z własnej pamięci strachu (fear_scope = "individual")
@@ -1859,12 +1865,29 @@ class Phantom(Mover):
             t = model.cycle * model.step_s
             self.look += math.radians(amp) * math.sin(2 * math.pi * t / float(p["scan_period_s"]) + self.scan_phase)
 
+    def remember(self, model):
+        """Z4d: niewidoczny bot zachowuje ostatnią widzianą strefę przez memory_s sekund."""
+        n = len(self.where_are_they)
+        if self.mem_level is None or len(self.mem_level) != n:
+            self.mem_level = [0] * n
+            self.mem_cycle = [-10 ** 9] * n
+        span = float(model.p["memory_s"]) / model.step_s
+        now = self.where_are_they
+        for i in range(n):
+            if now[i] > 0:
+                self.mem_level[i] = now[i]
+                self.mem_cycle[i] = model.cycle
+            elif model.cycle - self.mem_cycle[i] <= span:
+                now[i] = self.mem_level[i]
+
     def update_psychophysiology(self, model):
         p = model.p
         model._ignore = model.obstacles.containing(self.loc)
         if model.cone_half is not None:
             self.update_gaze(model)
         self.where_are_they = [self.distance_number(model, b.loc) for b in model.bots]
+        if float(p["memory_s"]) > 0:
+            self.remember(model)
         self.cortisol = self.cortisol * p["cortisol_cooldown"]
         self.cortisol = self.cortisol + p["cortisol_gain"] * self.adrenaline / ((self.cortisol + 1.0) * (self.cortisol + 1.0))
         self.vigilance = self.required_vigilance()
@@ -3294,6 +3317,24 @@ def test_scan_moves_look():
         ph.update_gaze(m)
         looks.append(ph.look)
     assert max(looks) - min(looks) > math.radians(50) and max(abs(x) for x in looks) <= math.radians(30) + 1e-9
+
+
+def test_memory_of_seen_bots():
+    bush = [[(60, 45), (62, 45), (62, 55), (60, 55), (60, 45)]]
+    for mem, want in ((0.0, 3.01), (10.0, 0.0)):
+        m = _tiny_model({"memory_s": mem}, obstacles=[bush])
+        ph = m.phantoms[0]
+        ph.loc = (50.0, 50.0)
+        b = Mover(m.net, m.rng, 0.0)
+        m.bots = [b]
+        vs = []
+        # widoczny w strefie społecznej (12 m), znika za krzakiem, po 3 cyklach wraca w to samo miejsce
+        for c, q in enumerate([(50.0, 62.0), (50.0, 62.0), (70.0, 50.0), (70.0, 50.0), (70.0, 50.0), (50.0, 62.0)]):
+            m.cycle = c
+            b.loc = q
+            ph.update_psychophysiology(m)
+            vs.append(ph.vigilance)
+        assert abs(vs[-1] - want) < 1e-9, (mem, vs)
 
 
 def test_rear_masked_switch():

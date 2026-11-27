@@ -82,6 +82,8 @@ global {
 	float turn_rate_dps <- 0.0;        // °/s, maks. szybkość obrotu spojrzenia; 0 = spojrzenie = kierunek ruchu
 	float scan_amp_deg <- 0.0;         // °, amplituda rozglądania się; 0 = brak
 	float scan_period_s <- 4.0;        // s, okres rozglądania się
+	// Z4d: pamięć widzianych osób: niewidoczny bot zachowuje ostatnią strefę przez memory_s sekund; 0 = bez pamięci
+	float memory_s <- 0.0;
 	// Z5: ciemność z lamp
 	bool dark_on <- false;
 	string lamps_file <- "";           // SHP z punktami lamp; puste = brak lamp (przy dark_on: pełna ciemność)
@@ -312,8 +314,26 @@ species phantom skills: [moving] {
       }
    }
 
+   list<int> mem_level <- [];
+   list<int> mem_cycle <- [];
+
    reflex update_psychophysiology {
       where_are_they <- bot collect distance_number(each.location);
+      if (memory_s > 0.0) {
+         if (length(mem_level) != length(where_are_they)) {
+            mem_level <- list_with(length(where_are_they), 0);
+            mem_cycle <- list_with(length(where_are_they), -1000000000);
+         }
+         float span <- memory_s / step;
+         loop i from: 0 to: (length(where_are_they) - 1) {
+            if (where_are_they[i] > 0) {
+               mem_level[i] <- where_are_they[i];
+               mem_cycle[i] <- cycle;
+            } else if ((cycle - mem_cycle[i]) <= span) {
+               where_are_they[i] <- mem_level[i];
+            }
+         }
+      }
 
       cortisol <- cortisol * cortisol_cooldown;
       cortisol <- cortisol + 0.2*adrenaline / ((cortisol + 1.0)*(cortisol + 1.0));
@@ -477,6 +497,7 @@ experiment Hall  type: gui {
 	parameter "Szybkość obrotu spojrzenia (°/s)" var: turn_rate_dps category: "Percepcja";
 	parameter "Rozglądanie się: amplituda (°)" var: scan_amp_deg category: "Percepcja";
 	parameter "Rozglądanie się: okres (s)" var: scan_period_s category: "Percepcja";
+	parameter "Pamięć widzianych osób (s)" var: memory_s category: "Percepcja";
 	parameter "Ciemność (widać tylko w kręgu lamp)" var: dark_on category: "Ciemność i sezon";
 	parameter "Plik lamp (SHP, punkty)" var: lamps_file category: "Ciemność i sezon";
 	parameter "Promień kręgu lampy (m)" var: lamp_radius category: "Ciemność i sezon";
