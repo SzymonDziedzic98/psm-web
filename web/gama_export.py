@@ -42,9 +42,6 @@ def _rules(p):
         ("bot_nb", r"int bot_nb <- [0-9]+;", "int bot_nb <- %d;" % int(p["bot_nb"]), 1),
         ("bot_graph", r"bool bots_plain_graph <- \w+;", "bool bots_plain_graph <- %s;" % _bool(p["bot_graph"] == "plain"), 1),
         ("fear_scope", r"bool individual_fear <- \w+;", "bool individual_fear <- %s;" % _bool(p["fear_scope"] == "individual"), 1),
-        ("bot_speed_kmh", r"speed <- [0-9.]+ #km/#h \+ gauss\(0,\s*[0-9.]+\);",
-         "speed <- %s #km/#h + gauss(0,%s);" % (_num(p["bot_speed_kmh"]), _num(p["bot_speed_sd"])), 1),
-        ("phantom_speed_kmh", r"speed <- [0-9.]+ #km/#h ;", "speed <- %s #km/#h ;" % _num(p["phantom_speed_kmh"]), 1),
         ("adrenaline_threshold", r"if \(adrenaline > [0-9.]+\)", "if (adrenaline > %s)" % _num(p["adrenaline_threshold"]), 1),
         ("fear_spacing", r"empty\(fear at_distance [0-9.]+\)", "empty(fear at_distance %s)" % _num(p["fear_spacing"]), 1),
         ("adrenaline_cooldown", r"float adrenaline_cooldown <- [0-9.]+;", "float adrenaline_cooldown <- %s;" % _num(p["adrenaline_cooldown"]), 1),
@@ -52,15 +49,36 @@ def _rules(p):
         ("cortisol_gain", r"cortisol <- cortisol \+ [0-9.]+\*adrenaline", "cortisol <- cortisol + %s*adrenaline" % _num(p["cortisol_gain"]), 1),
         ("initial_level", r"float (vigilance|adrenaline|cortisol) <- [0-9.]+;",
          lambda m: "float %s <- %s;" % (m.group(1), _num(p["initial_level"])), 3),
-        ("end_cycle", r"cycle >= [0-9]+\)", "cycle >= %d)" % int(p["end_cycle"]), 1),
-        ("end_cycle", r"when: cycle = [0-9]+ \{", "when: cycle = %d {" % (int(p["end_cycle"]) - 1), 1),
-        ("end_cycle", r"autosave: cycle=[0-9]+", "autosave: cycle=%d" % int(p["end_cycle"]), 1),
     ]
+    # zmienne globalne GAML o tej samej nazwie co parametr strony (profile wieku, percepcja, ciemność, sezon, Z14)
+    for key, typ in SAME_NAME:
+        if key in p:
+            v = p[key]
+            val = (_bool(v) if typ == "bool" else str(int(v)) if typ == "int" else
+                   '"%s"' % v if typ == "string" else _num(v))
+            r.append((key, r"\t%s %s <- [^;]+;" % (typ, key), "\t%s %s <- %s;" % (typ, key, val), 1))
+    # parametry SFM o innej nazwie w GAML (shoulder_length itd. to zmienne skilla pedestrian)
+    for key, gk in (("shoulder_length", "sfm_shoulder_length"), ("minimal_distance", "sfm_minimal_distance"),
+                    ("proba_detour", "sfm_proba_detour")):
+        if key in p:
+            r.append((key, r"\tfloat %s <- [^;]+;" % gk, "\tfloat %s <- %s;" % (gk, _num(p[key])), 1))
     for z, k in (("intimate", 0.45), ("personal", 1.2), ("social", 3.6), ("public", 10.0)):
         if p.get(z) is not None:
             r.append((z, r"float %s\s*<-\s*[^;]+;" % z, "float %s <- %s;" % (z, _num(p[z])), 1))
     return r
 
+
+SAME_NAME = [("end_cycle", "int"), ("phantom_speed_kmh", "float"), ("bot_speed_kmh", "float"), ("bot_speed_sd", "float"),
+             ("bot_older_share", "float"), ("bot_older_speed_factor", "float"), ("bot_run_share", "float"),
+             ("bot_run_speed_kmh", "float"), ("bot_run_speed_sd", "float"), ("bot_bike_share", "float"),
+             ("bot_bike_speed_kmh", "float"), ("bot_bike_speed_sd", "float"), ("bike_paths_only", "bool"),
+             ("fov_deg", "float"), ("rear_factor", "float"), ("rear_zones", "int"), ("rear_masked", "bool"),
+             ("turn_rate_dps", "float"), ("scan_amp_deg", "float"), ("scan_period_s", "float"), ("memory_s", "float"),
+             ("dark_on", "bool"), ("lamp_radius", "float"), ("dark_detect_m", "float"), ("season", "string"),
+             ("bush_evergreen_share", "float"), ("path_space", "bool"), ("path_width_m", "float"), ("sfm_A_ped", "float"),
+             ("sfm_B_ped", "float"), ("sfm_relax", "float"), ("sfm_gamma", "float"), ("sfm_lambda", "float"),
+             ("sfm_k", "float"), ("sfm_kappa", "float"), ("ped_consideration_m", "float"),
+             ("waypoint_tolerance", "float"), ("hard_core", "bool")]
 
 # parametry, które zapisuje geometria w SHP, i te, których GAML nie ma
 IN_SHP = ("park", "park_seed", "park_width", "park_height", "park_bushes", "planting", "planting_seed", "bush_area_total",

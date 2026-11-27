@@ -92,7 +92,58 @@ global {
 	// Z6: sezon
 	string season <- "summer";         // "winter": przeszkody z leaf_cycle = deciduous znikają
 	float bush_evergreen_share <- 1.0; // zimą: udział zostających przeszkód bez leaf_cycle
+	// Z14: przestrzeń ścieżki i ruch bez przenikania (skill pedestrian, model "advanced" = siła społeczna)
+	bool path_space <- false;          // false = ruch po osi ścieżki jak dotąd (goto)
+	float path_width_m <- 2.5;         // szerokość ścieżki bez atrybutu width w SHP
+	float sfm_shoulder_length <- 0.45; // m, średnica ciała (shoulder_length skilla)
+	float sfm_minimal_distance <- 0.25;
+	float sfm_A_ped <- 0.16;
+	float sfm_B_ped <- 0.1;
+	float sfm_relax <- 0.5;
+	float sfm_gamma <- 0.35;
+	float sfm_lambda <- 0.1;
+	float sfm_k <- 200.0;
+	float sfm_kappa <- 400.0;
+	float ped_consideration_m <- 3.0;
+	float sfm_proba_detour <- 0.5;
+	float waypoint_tolerance <- 1.0;
+	bool hard_core <- true;            // krok zbliżający na < sfm_shoulder_length: krok w bok o 30/60/90° albo stoi
+	graph space_network;               // graf odcinków (bez wag) do build_intersection_areas
+	// boty i phantomy dla twardego rdzenia. Uwaga: kod gatunku bot nie może odwoływać się do gatunku phantom (także
+	// pośrednio przez funkcje globalne): GAMA zmienia wtedy kolejność wykonywania gatunków i wyniki domyślne.
+	list<agent> walkers <- [];
 	// <<< PROFILE WIEKU
+
+	// Z14: twardy rdzeń po do walk. Krok start -> location, który zbliża ciało na mniej niż sfm_shoulder_length
+	// do innego (i bliżej niż przed krokiem), jest obracany o 30°, 60°, 90° najpierw w stronę przeciwną do
+	// blokującego, potem w drugą; pierwszy krok w wolnej przestrzeni bez naruszenia rdzenia wygrywa, inaczej powrót.
+	agent core_block(agent a, point start, point q) {
+		float sh <- sfm_shoulder_length;
+		list<agent> near <- walkers where (each != a and (each.location distance_to start) <= sh + (start distance_to q) + 1e-9);
+		loop o over: near {
+			float dn <- q distance_to o.location;
+			if (dn < sh and dn < (start distance_to o.location)) { return o; }
+		}
+		return nil;
+	}
+	point core_fix(agent a, point start, road r) {
+		point q <- a.location;
+		if (q = start) { return q; }
+		agent blk <- core_block(a, start, q);
+		if (blk = nil) { return q; }
+		float vx <- q.x - start.x;
+		float vy <- q.y - start.y;
+		float cr <- vx * (blk.location.y - start.y) - vy * (blk.location.x - start.x);
+		float fs <- (cr >= 0) ? -1.0 : 1.0;
+		loop sgn over: [fs, 0.0 - fs] {
+			loop deg over: [30.0, 60.0, 90.0] {
+				float t <- deg * sgn;
+				point c <- {start.x + vx * cos(t) - vy * sin(t), start.y + vx * sin(t) + vy * cos(t)};
+				if ((r = nil or r.free_space covers c) and core_block(a, start, c) = nil) { return c; }
+			}
+		}
+		return start;
+	}
 
 	reflex stop_after_steps {
         if (cycle >= end_cycle) {
@@ -124,6 +175,13 @@ global {
     		create road from: shape_file_roads with: [bike_tag::string(read("bicycle"))];
     	} else {
         	create road from: shape_file_roads ;
+        }
+        if (path_space) {
+        	// Z14: atrybut width (m) z SHP, jeśli jest
+        	ask road {
+        		string ws <- string(shape get "width");
+        		if (ws != nil and ws != "" and ws != "nil") { width_m <- float(ws); }
+        	}
         }
         create bot number: bot_nb {
         	speed <- bot_speed_kmh #km/#h + gauss(0, bot_speed_sd);
@@ -161,6 +219,27 @@ global {
 						target <- location;
 					}
 				}
+			}
+		}
+		// Z14: wolna przestrzeń odcinków (bufor o połowę szerokości), sąsiedztwo, parametry skilla pedestrian
+		if (path_space) {
+			ask road {
+				float w <- (width_m > 0.0) ? width_m : path_width_m;
+				do initialize distance: w / 2.0;
+				free_space <- shape + (w / 2.0);   // zaokrąglone końce: bez szczelin na załamaniach (jak w Pythonie)
+				half_width <- w / 2.0;
+			}
+			space_network <- as_edge_graph(road);
+			ask road { do build_intersection_areas pedestrian_graph: space_network; }
+			walkers <- list<agent>(bot) + list<agent>(phantom);
+			list<point> placed <- [];
+			ask bot {
+				do setup_space(placed);
+				placed << location;
+			}
+			ask phantom {
+				do setup_space(placed);
+				placed << location;
 			}
 		}
 		// Z4c: losowa faza rozglądania się (losowanie tylko przy scan_amp_deg > 0)
@@ -230,28 +309,70 @@ species obstacle {
 	}
 }
 
-species bot skills: [moving] {
+species bot skills: [pedestrian] {
 	point target;
 	string kind <- "walk";   // Z3b, Z12: walk / older / run / bike
 
+	// Z14: start w losowym miejscu przekroju ścieżki (do 20 prób bez nakładania), ciało = punkt, parametry SFM
+	action setup_space(list<point> placed) {
+		road r <- road closest_to self;
+		float h <- max([0.0, r.half_width - sfm_shoulder_length / 2.0]);
+		geometry zone <- (h > 0.0) ? (r.shape + h) : r.shape;
+		loop times: 20 {
+			location <- any_location_in(zone);
+			if (empty(placed where ((each distance_to location) < sfm_shoulder_length))) { break; }
+		}
+		shape <- location;
+		pedestrian_model <- "advanced";
+		shoulder_length <- sfm_shoulder_length;
+		minimal_distance <- sfm_minimal_distance;
+		A_pedestrians_SFM <- sfm_A_ped;
+		B_pedestrians_SFM <- sfm_B_ped;
+		relaxion_SFM <- sfm_relax;
+		gama_SFM <- sfm_gamma;
+		lambda_SFM <- sfm_lambda;
+		k_SFM <- sfm_k;
+		kappa_SFM <- sfm_kappa;
+		pedestrian_consideration_distance <- ped_consideration_m;
+		proba_detour <- sfm_proba_detour;
+		tolerance_waypoint <- waypoint_tolerance;
+		avoid_other <- true;
+		obstacle_species <- [];
+	}
+
 	reflex normal_move {
 		bool on_bike_net <- (kind = "bike") and (bike_network != nil);
-		if ((target distance_to location)<1) {
-			target <- on_bike_net ? any_location_in(one_of(bike_roads)) : any_location_in(one_of(road));
-		}
-		else {
-			if (on_bike_net) {
-				do goto target: target on: bike_network;
-			} else if (move_by_length) {
-				do goto target: target on: (bots_plain_graph ? bot_network : road_network) move_weights: length_weights;
-			} else {
-				do goto target: target on: (bots_plain_graph ? bot_network : road_network);
+		if (path_space) {
+			point start <- location;
+			if (final_waypoint = nil) {
+				target <- on_bike_net ? any_location_in(one_of(bike_roads)) : any_location_in(one_of(road));
+				do compute_virtual_path pedestrian_graph: (on_bike_net ? bike_network : (bots_plain_graph ? bot_network : road_network)) target: target;
+			}
+			do walk;
+			if (hard_core) {
+				road r <- (current_waypoint != nil and roads_waypoints contains_key current_waypoint) ? road(roads_waypoints[current_waypoint]) : (road closest_to self);
+				location <- world.core_fix(self, start, r);
+			}
+			if (location != start) { heading <- start towards location; }   // walk nie ustawia heading
+		} else {
+			if ((target distance_to location)<1) {
+				target <- on_bike_net ? any_location_in(one_of(bike_roads)) : any_location_in(one_of(road));
+			}
+			else {
+				if (on_bike_net) {
+					do goto target: target on: bike_network;
+				} else if (move_by_length) {
+					do goto target: target on: (bots_plain_graph ? bot_network : road_network) move_weights: length_weights;
+				} else {
+					do goto target: target on: (bots_plain_graph ? bot_network : road_network);
+				}
 			}
 		}
 	}
 
 	aspect default {
-		draw shape rotate: heading + 90 color: #brown;
+		if (path_space) { draw triangle(1.0) rotate: heading + 90 color: #brown; }
+		else { draw shape rotate: heading + 90 color: #brown; }
 	}
 }
 
@@ -262,7 +383,7 @@ species fear {
 	}
 }
 
-species phantom skills: [moving] {
+species phantom skills: [pedestrian] {
 
    float total_adrenaline <- 0.0;
     float total_cortisol   <- 0.0;
@@ -412,15 +533,59 @@ species phantom skills: [moving] {
 	// goto z parametrem on: road_network (ważony) -> phantom wybiera trasę
 	// minimalizującą sumę wag, czyli unika odcinków o wysokim fear_memory.
 	// Mechanika ruchu i losowania celu pozostaje bez zmian.
-	reflex normal_move {
-		if ((target distance_to location)<1) {
-			target <- any_location_in(one_of(road));
+	// Z14: jak u botów
+	action setup_space(list<point> placed) {
+		road r <- road closest_to self;
+		float h <- max([0.0, r.half_width - sfm_shoulder_length / 2.0]);
+		geometry zone <- (h > 0.0) ? (r.shape + h) : r.shape;
+		loop times: 20 {
+			location <- any_location_in(zone);
+			if (empty(placed where ((each distance_to location) < sfm_shoulder_length))) { break; }
 		}
-		else {
-			if (move_by_length) {
-				do goto target: target on: (individual_fear ? my_network : road_network) move_weights: length_weights;
-			} else {
-				do goto target: target on: (individual_fear ? my_network : road_network);
+		shape <- location;
+		pedestrian_model <- "advanced";
+		shoulder_length <- sfm_shoulder_length;
+		minimal_distance <- sfm_minimal_distance;
+		A_pedestrians_SFM <- sfm_A_ped;
+		B_pedestrians_SFM <- sfm_B_ped;
+		relaxion_SFM <- sfm_relax;
+		gama_SFM <- sfm_gamma;
+		lambda_SFM <- sfm_lambda;
+		k_SFM <- sfm_k;
+		kappa_SFM <- sfm_kappa;
+		pedestrian_consideration_distance <- ped_consideration_m;
+		proba_detour <- sfm_proba_detour;
+		tolerance_waypoint <- waypoint_tolerance;
+		avoid_other <- true;
+		obstacle_species <- [];
+	}
+
+	reflex normal_move {
+		if (path_space) {
+			// ten sam cel; trasa przeliczana po każdej przebudowie wag strachu (co reweight_every cykli)
+			point start <- location;
+			if (final_waypoint = nil) {
+				target <- any_location_in(one_of(road));
+				do compute_virtual_path pedestrian_graph: (individual_fear ? my_network : road_network) target: target;
+			} else if ((cycle mod reweight_every) = 0) {
+				do compute_virtual_path pedestrian_graph: (individual_fear ? my_network : road_network) target: target;
+			}
+			do walk;
+			if (hard_core) {
+				road r <- (current_waypoint != nil and roads_waypoints contains_key current_waypoint) ? road(roads_waypoints[current_waypoint]) : (road closest_to self);
+				location <- world.core_fix(self, start, r);
+			}
+			if (location != start) { heading <- start towards location; }   // walk nie ustawia heading
+		} else {
+			if ((target distance_to location)<1) {
+				target <- any_location_in(one_of(road));
+			}
+			else {
+				if (move_by_length) {
+					do goto target: target on: (individual_fear ? my_network : road_network) move_weights: length_weights;
+				} else {
+					do goto target: target on: (individual_fear ? my_network : road_network);
+				}
 			}
 		}
 	}
@@ -433,13 +598,16 @@ species phantom skills: [moving] {
     	draw social_perception_geometry color: blend(#brown, #blue, 0.8) ;
 	}
 	aspect default {
-		draw shape rotate: heading + 90 color: #blue;
+		if (path_space) { draw triangle(2.0) rotate: heading + 90 color: #blue; }
+		else { draw shape rotate: heading + 90 color: #blue; }
 	}
 }
 
-species road {
+species road skills: [pedestrian_road] {
     rgb color <- rgb(0,0,0) ;
     string bike_tag <- "";   // Z12: atrybut bicycle (tylko przy bike_paths_only)
+    float width_m <- 0.0;    // Z14: atrybut width z SHP (0 = brak, wtedy path_width_m)
+    float half_width <- 0.0;
 
 	// >>> FEEDBACK: pamięć strachu na odcinku <<<
 	float fear_memory <- 0.0;
@@ -504,6 +672,21 @@ experiment Hall  type: gui {
 	parameter "Wykrycie w ciemności (m)" var: dark_detect_m category: "Ciemność i sezon";
 	parameter "Sezon" var: season among: ["summer", "winter"] category: "Ciemność i sezon";
 	parameter "Zimą udział zasłaniających (bez leaf_cycle)" var: bush_evergreen_share category: "Ciemność i sezon";
+	parameter "Przestrzeń ścieżki (siła społeczna 2D)" var: path_space category: "Przestrzeń ścieżki";
+	parameter "Szerokość ścieżki bez atrybutu width (m)" var: path_width_m category: "Przestrzeń ścieżki";
+	parameter "Średnica ciała (m)" var: sfm_shoulder_length category: "Przestrzeń ścieżki";
+	parameter "Minimalny odstęp (m)" var: sfm_minimal_distance category: "Przestrzeń ścieżki";
+	parameter "SFM: A pieszych" var: sfm_A_ped category: "Przestrzeń ścieżki";
+	parameter "SFM: B pieszych" var: sfm_B_ped category: "Przestrzeń ścieżki";
+	parameter "SFM: czas relaksacji (s)" var: sfm_relax category: "Przestrzeń ścieżki";
+	parameter "SFM: gamma" var: sfm_gamma category: "Przestrzeń ścieżki";
+	parameter "SFM: lambda (anizotropia)" var: sfm_lambda category: "Przestrzeń ścieżki";
+	parameter "SFM: k (sprężystość ciała)" var: sfm_k category: "Przestrzeń ścieżki";
+	parameter "SFM: kappa (tarcie)" var: sfm_kappa category: "Przestrzeń ścieżki";
+	parameter "Zasięg uwzględniania pieszych (m)" var: ped_consideration_m category: "Przestrzeń ścieżki";
+	parameter "Prawdopodobieństwo objazdu" var: sfm_proba_detour category: "Przestrzeń ścieżki";
+	parameter "Tolerancja punktu trasy (m)" var: waypoint_tolerance category: "Przestrzeń ścieżki";
+	parameter "Twardy rdzeń (bez przenikania)" var: hard_core category: "Przestrzeń ścieżki";
 	// <<< PROFILE WIEKU
 
     output {

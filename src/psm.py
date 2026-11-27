@@ -1774,6 +1774,7 @@ class Mover:
 
     def normal_move(self, model):
         if model.sfm:
+            start = self.loc
             if self.wps is None:
                 if self.kind == "bike" and model.bike_edges:
                     e = model.bike_edges[model.rng.randrange(len(model.bike_edges))]
@@ -1785,6 +1786,10 @@ class Mover:
             elif isinstance(self, Phantom) and self.route_ver != model.graph_version:
                 sfm_virtual_path(model, self)   # phantom: nowa trasa po przeliczeniu wag strachu
             sfm_walk(model, self)
+            if model.p["hard_core"]:
+                _core_fix(model, self, start)
+            if self.loc != start:   # skill pedestrian nie ustawia heading: kierunek całego kroku (tak samo w GAML)
+                self.heading = math.atan2(self.loc[1] - start[1], self.loc[0] - start[0])
             return
         # if target distance_to location < 1: nowy cel, w przeciwnym razie goto po road_network
         if dist(self.target_loc, self.loc) < 1.0:
@@ -2111,10 +2116,7 @@ def _sfm_register(model, a, e, place=False):
     if e is not None:
         model.on_edge[e.id].add(a)
         if place and not _in_free_space(model, e, a.loc):
-            q = _closest_in_free_space(model, e, a.loc)
-            if not model.p["hard_core"] or _hard_block(a, a.loc, q, _core_near(model, a.loc, 2.0),
-                                                       float(model.p["shoulder_length"])) is None:
-                a.loc = q
+            a.loc = _closest_in_free_space(model, e, a.loc)
 
 
 def sfm_virtual_path(model, a):
@@ -2138,10 +2140,7 @@ def sfm_virtual_path(model, a):
     a.wps, a.wpi = wps, 0
     _sfm_register(model, a, wps[0][1])
     if not _in_free_space(model, wps[0][1], a.loc):
-        q = _closest_in_free_space(model, wps[0][1], a.loc)
-        if not model.p["hard_core"] or _hard_block(a, a.loc, q, _core_near(model, a.loc, 2.0),
-                                                   float(model.p["shoulder_length"])) is None:
-            a.loc = q
+        a.loc = _closest_in_free_space(model, wps[0][1], a.loc)
 
 
 def _sfm_neighbors(model, a, e):
@@ -2190,23 +2189,37 @@ def _sidestep(model, a, e, loc, new, blk, near, sh):
 
 
 def sfm_walk(model, a):
-    """Krok w przestrzeni ścieżki; przy hard_core na końcu ta sama kontrola, co w GAML po do walk: jeśli cały krok
-    zbliżył ciało na mniej niż shoulder_length do kogoś (i bliżej niż przed krokiem), agent wraca na start."""
-    if not a.wps:
+    """Krok w przestrzeni ścieżki: PedestrianSkill.walk (_sfm_walk), a przy hard_core twardy rdzeń po kroku
+    (_core_fix), dokładnie jak w GAML po do walk."""
+    if a.wps:
+        _sfm_walk(model, a)
+
+
+def _core_fix(model, a, start):
+    """Twardy rdzeń po kroku start -> a.loc (łącznie z przeliczeniem trasy i relokacjami skilla). Krok, który zbliża
+    ciało na mniej niż shoulder_length do kogoś (i bliżej niż przed krokiem), jest obracany (_sidestep); gdy żaden
+    obrót nie pasuje, agent wraca na start."""
+    if a.loc == start:
         return
-    start = a.loc
-    _sfm_walk(model, a)
-    if model.p["hard_core"] and a.loc != start:
-        sh = float(model.p["shoulder_length"])
-        if _hard_block(a, start, a.loc, _core_near(model, start, sh + dist(start, a.loc)), sh) is not None:
-            a.odo -= dist(start, a.loc)
-            a.loc, a.vel = start, (0.0, 0.0)
+    sh = float(model.p["shoulder_length"])
+    core = _core_near(model, start, sh + dist(start, a.loc))
+    blk = _hard_block(a, start, a.loc, core, sh)
+    if blk is None:
+        return
+    e = a.road if a.road is not None else a.edge
+    q = _sidestep(model, a, e, start, a.loc, blk, core, sh)
+    a.odo -= dist(start, a.loc)
+    if q is None:
+        a.loc, a.vel = start, (0.0, 0.0)
+    else:
+        a.loc, a.vel = q, (q[0] - start[0], q[1] - start[1])
+        a.odo += dist(start, q)
 
 
 def _sfm_walk(model, a):
     """PedestrianSkill.walk + walkWithForceModel (avoid_other = true, bez przeszkód: ściany = obrys ścieżki).
     Twardy rdzeń (hard_core): ruch, po którym ciało jest bliżej niż shoulder_length od innego i bliżej niż przed
-    ruchem, jest zastępowany krokiem w bok (_sidestep) albo odrzucany."""
+    ruchem, poprawia potem _core_fix (po całym kroku, jak w GAML)."""
     p = model.p
     max_dist = a.speed * model.step_s
     tol = float(p["waypoint_tolerance"])
@@ -2230,17 +2243,9 @@ def _sfm_walk(model, a):
             if not _in_free_space(model, e, new):
                 new = _closest_in_free_space(model, e, new)
             accept = model.walk_rng.random() >= 1.0 - pdet or dist(new, target) <= dist(loc, target)
-            if accept and p["hard_core"]:
-                core = _core_near(model, loc, sh + max_dist)
-                blk = _hard_block(a, loc, new, core, sh)
-                if blk is not None:
-                    new = _sidestep(model, a, e, loc, new, blk, core, sh)
-                    accept = new is not None
             if accept:
                 a.vel = (new[0] - loc[0], new[1] - loc[1])
                 a.odo += math.hypot(a.vel[0], a.vel[1])
-                if a.vel != (0.0, 0.0):
-                    a.heading = math.atan2(a.vel[1], a.vel[0])
                 a.loc = new
             else:
                 a.vel = (0.0, 0.0)
@@ -3853,7 +3858,9 @@ def test_sfm_head_on_pass_without_overlap():
     for _ in range(400):
         for a in (b, ph):
             if a.wps is not None:
+                st = a.loc
                 sfm_walk(m, a)
+                _core_fix(m, a, st)
         mind = min(mind, dist(ph.loc, b.loc))
         for a in (b, ph):
             assert abs(a.loc[1]) <= m.edge_half[a.edge.id] + 1e-6, a.loc

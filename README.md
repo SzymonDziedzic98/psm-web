@@ -141,11 +141,21 @@ z artykułu UFUG (bee3774) w Pythonie i w GAML. Te same parametry są w `src/psm
 | Z4d | `memory_s` (0) | pamięć widzianych osób: niewidoczny bot przez `memory_s` s zachowuje ostatnią strefę, więc stres daje tylko wzrost ponad nią (dotyczy też krzewów, dlatego tylko razem ze stożkiem) |
 | Z5 | `dark_on` (false), `lamp_radius` (10 m), `dark_detect_m` (5 m) | bot poza kręgiem lampy niewidoczny dalej niż `dark_detect_m`; lampy: `--lamps plik` albo warstwa `lamps` |
 | Z6 | `season` (summer), `bush_evergreen_share` (1) | zimą znikają przeszkody `leaf_cycle = deciduous`, a bez tej właściwości zostaje podany udział |
+| Z14 | `path_space` (false), `path_width_m` (2,5 m), `shoulder_length` (0,45 m), `hard_core` (true), parametry `sfm_*` | ruch w przestrzeni ścieżki zamiast po osi: siła społeczna (model „advanced” skilla `pedestrian` z GAMA, w Pythonie wierny port) i twardy rdzeń bez przenikania; szerokość z właściwości `width` odcinka albo `path_width_m` |
 
 Wariant badawczy starszej osoby: `--set fov_deg=120 --set rear_factor=0.6 --set rear_zones=2 --set phantom_speed_kmh=2.8`.
 Wolniejszy phantom przechodzi mniej, więc profile porównuje się na kilometr: `--per-km` dodaje kolumny
 `phantom_km`, `adrenaline_per_km`, `fear_events_per_km` (bez tej flagi pliki wyników mają te same kolumny co dotąd).
 W Pythonie typy botów losuje osobny generator, więc przebiegi z typami i bez są sparowane seed w seed; w GAMA nie.
+
+Przestrzeń ścieżki (Z14): każdy odcinek ma wolną przestrzeń o połowie szerokości po obu stronach osi. Agenci idą
+do kolejnych wierzchołków trasy (`compute_virtual_path` + `walk` skilla `pedestrian`, w Pythonie `sfm_virtual_path`
+i `sfm_walk`), a siła społeczna odpycha ich od pieszych z tego i sąsiednich odcinków. Twardy rdzeń działa po kroku:
+krok, który zbliża ciało na mniej niż `shoulder_length` (w GAML `sfm_shoulder_length`) do kogoś, jest obracany
+o 30°, 60° albo 90° (najpierw od blokującego), a gdy żaden obrót nie mieści się w ścieżce, agent stoi. Agenci startują
+w losowym miejscu przekroju ścieżki. Metryki `jumps_1` … `jumps_4` liczą wzrosty strefy o 1–4 poziomy (z `--per-km`).
+W GAML kod gatunku `bot` nie może odwoływać się do gatunku `phantom` (nawet przez funkcję globalną), bo GAMA zmienia
+wtedy kolejność wykonywania gatunków i wyniki domyślne; dlatego twardy rdzeń używa globalnej listy `walkers`.
 
 ## Dane wejściowe
 
