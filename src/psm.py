@@ -117,6 +117,11 @@ DEFAULTS = {
     "rear_factor": 1.0,            # mnożnik promieni stref poza stożkiem (Yu i in. 2020: tył ≈ 0,6 przodu)
     "rear_zones": 4,               # ile stref (od intymnej) istnieje poza stożkiem: 4 = wszystkie, 2 = intymna i osobista, 0 = nic
     "rear_masked": True,           # poza stożkiem też maskowanie przeszkodami (False: słuch przez krzewy)
+    # Z4c: kierunek patrzenia (tylko przy fov_deg < 360). Bez tego phantom patrzy zawsze w kierunku ruchu
+    # i przy zawróceniu o 180° widzi naraz wszystkich, których miał za plecami.
+    "turn_rate_dps": 0.0,          # °/s, maks. szybkość obrotu spojrzenia ku kierunkowi ruchu; 0 = natychmiast (jak ruch)
+    "scan_amp_deg": 0.0,           # °, amplituda rozglądania się wokół kierunku spojrzenia; 0 = bez rozglądania
+    "scan_period_s": 4.0,          # s, okres rozglądania się (sinusoida, losowa faza dla każdego phantoma)
     # Z5: ciemność z lamp
     "dark_on": False,              # True: bot poza kręgiem lampy niewidoczny dalej niż dark_detect_m
     "lamp_radius": 10.0,           # m, promień kręgu światła lampy
@@ -200,6 +205,9 @@ GUI_PARAMETERS = [
         ("rear_factor", "Mnożnik stref za plecami"),
         ("rear_zones", "Strefy za plecami (od intymnej; 4 = wszystkie)"),
         ("rear_masked", "Za plecami maskowanie przeszkodami"),
+        ("turn_rate_dps", "Szybkość obrotu spojrzenia (°/s; 0 = natychmiast)"),
+        ("scan_amp_deg", "Rozglądanie się: amplituda (°; 0 = brak)"),
+        ("scan_period_s", "Rozglądanie się: okres (s)"),
     ]),
     ("Ciemność i sezon", [
         ("dark_on", "Ciemność (widać tylko w kręgu lamp)"),
@@ -228,7 +236,7 @@ RESTART_KEYS = {"bot_nb", "phantom_nb", "bot_speed_kmh", "bot_speed_sd", "phanto
                 "bush_form", "bush_band_width", "bush_band_length",
                 "bot_older_share", "bot_older_speed_factor", "bot_run_share", "bot_run_speed_kmh", "bot_run_speed_sd",
                 "bot_bike_share", "bot_bike_speed_kmh", "bot_bike_speed_sd", "bike_paths_only",
-                "fov_deg", "rear_factor", "rear_zones", "dark_on", "lamp_radius", "season", "bush_evergreen_share"}
+                "fov_deg", "rear_factor", "rear_zones", "scan_amp_deg", "dark_on", "lamp_radius", "season", "bush_evergreen_share"}
 
 
 def resolved_params(params=None):
@@ -1763,7 +1771,8 @@ class Mover:
 
 class Phantom(Mover):
     __slots__ = ("vigilance", "adrenaline", "cortisol", "total_adrenaline", "total_cortisol",
-                 "total_vigilance", "where_are_they", "where_were_they", "fear_events", "fear", "weights")
+                 "total_vigilance", "where_are_they", "where_were_they", "fear_events", "fear", "weights",
+                 "gaze", "look", "scan_phase")
 
     def __init__(self, net, rng, speed, level):
         Mover.__init__(self, net, rng, speed)
@@ -1778,6 +1787,9 @@ class Phantom(Mover):
         self.fear_events = 0
         self.fear = {}          # własna pamięć strachu (fear_scope = "individual"): id odcinka -> wartość
         self.weights = None
+        self.gaze = None        # kierunek spojrzenia (rad), Z4c; None = jeszcze nie ustawiony
+        self.look = self.heading
+        self.scan_phase = 0.0
 
     def route_weights(self, model):
         # phantom: wspólny graf albo własne wagi z własnej pamięci strachu (fear_scope = "individual")
@@ -1788,7 +1800,7 @@ class Phantom(Mover):
         p = model.p
         if model.cone_half is not None:
             # Z4/Z4b: poza stożkiem widzenia (kąt od kierunku ruchu > fov_deg / 2) liczą się strefy "za plecami"
-            off = abs((math.atan2(q[1] - self.loc[1], q[0] - self.loc[0]) - self.heading + math.pi)
+            off = abs((math.atan2(q[1] - self.loc[1], q[0] - self.loc[0]) - self.look + math.pi)
                       % (2 * math.pi) - math.pi)
             if off > model.cone_half:
                 return self._rear_number(model, q, d)
@@ -1831,9 +1843,27 @@ class Phantom(Mover):
                 total += diff * diff - 0.99
         return total
 
+    def update_gaze(self, model):
+        """Z4c: spojrzenie obraca się ku kierunkowi ruchu najwyżej o turn_rate_dps × krok, plus rozglądanie się."""
+        p = model.p
+        rate = float(p["turn_rate_dps"])
+        if self.gaze is None or rate <= 0:
+            self.gaze = self.heading
+        else:
+            d = (self.heading - self.gaze + math.pi) % (2 * math.pi) - math.pi
+            mx = math.radians(rate) * model.step_s
+            self.gaze += max(-mx, min(mx, d))
+        amp = float(p["scan_amp_deg"])
+        self.look = self.gaze
+        if amp > 0:
+            t = model.cycle * model.step_s
+            self.look += math.radians(amp) * math.sin(2 * math.pi * t / float(p["scan_period_s"]) + self.scan_phase)
+
     def update_psychophysiology(self, model):
         p = model.p
         model._ignore = model.obstacles.containing(self.loc)
+        if model.cone_half is not None:
+            self.update_gaze(model)
         self.where_are_they = [self.distance_number(model, b.loc) for b in model.bots]
         self.cortisol = self.cortisol * p["cortisol_cooldown"]
         self.cortisol = self.cortisol + p["cortisol_gain"] * self.adrenaline / ((self.cortisol + 1.0) * (self.cortisol + 1.0))
@@ -1931,6 +1961,10 @@ class Model:
         self.phantoms = [Phantom(self.net, self.rng, float(p["phantom_speed_kmh"]) * kmh, float(p["initial_level"]))
                          for _ in range(int(p["phantom_nb"]))]
         self._assign_bot_types(extras.get("bike_lines") or [])
+        if float(p["scan_amp_deg"]) > 0:
+            srng = random.Random(self.seed ^ 0x6A2E)
+            for ph in self.phantoms:
+                ph.scan_phase = srng.uniform(0.0, 2 * math.pi)
         self.rebuild_graph()
 
     def _assign_bot_types(self, bike_lines):
@@ -3207,6 +3241,7 @@ def test_cone_rear_zones():
     m = _tiny_model({"fov_deg": 180.0, "rear_factor": 0.6, "rear_zones": 2})
     ph = m.phantoms[0]
     ph.loc, ph.heading = (50.0, 50.0), 0.0      # idzie w stronę +x
+    ph.update_gaze(m)
     m._ignore = set()
     # z przodu jak dotąd
     assert ph.distance_number(m, (51.0, 50.0)) == 4
@@ -3222,8 +3257,43 @@ def test_cone_rear_zones():
     m0 = _tiny_model({"fov_deg": 180.0, "rear_zones": 0})
     q = m0.phantoms[0]
     q.loc, q.heading = (50.0, 50.0), math.pi
+    q.update_gaze(m0)
     m0._ignore = set()
     assert q.distance_number(m0, (51.0, 50.0)) == 0 and q.distance_number(m0, (49.0, 50.0)) == 4
+
+
+def test_gaze_turns_gradually():
+    m = _tiny_model({"fov_deg": 180.0, "rear_factor": 0.6, "rear_zones": 2, "turn_rate_dps": 90.0})
+    ph = m.phantoms[0]
+    ph.loc, ph.heading = (50.0, 50.0), 0.0
+    m._ignore = set()
+    ph.update_gaze(m)
+    assert ph.look == 0.0
+    ph.heading = math.pi                     # zawraca
+    ph.update_gaze(m)                        # 90°/s × 0,3 s = 27°
+    assert abs(abs(ph.gaze) - math.radians(27)) < 1e-9
+    assert ph.distance_number(m, (60.0, 50.0)) == 2   # nadal widzi to, co było przed nim
+    for _ in range(7):
+        ph.update_gaze(m)
+    assert abs((ph.gaze - ph.heading + math.pi) % (2 * math.pi) - math.pi) < 1e-9   # po 8 krokach (216°) dogonił
+    # bez turn_rate spojrzenie = kierunek ruchu
+    m0 = _tiny_model({"fov_deg": 180.0})
+    q = m0.phantoms[0]
+    q.heading = 1.0
+    q.update_gaze(m0)
+    assert q.look == 1.0
+
+
+def test_scan_moves_look():
+    m = _tiny_model({"fov_deg": 120.0, "scan_amp_deg": 30.0, "scan_period_s": 4.0})
+    ph = m.phantoms[0]
+    ph.heading = 0.0
+    looks = []
+    for c in range(14):
+        m.cycle = c
+        ph.update_gaze(m)
+        looks.append(ph.look)
+    assert max(looks) - min(looks) > math.radians(50) and max(abs(x) for x in looks) <= math.radians(30) + 1e-9
 
 
 def test_rear_masked_switch():
@@ -3233,6 +3303,7 @@ def test_rear_masked_switch():
                         obstacles=[bush])
         ph = m.phantoms[0]
         ph.loc, ph.heading = (50.0, 50.0), 0.0
+        ph.update_gaze(m)
         m._ignore = set()
         assert ph.distance_number(m, (47.2, 50.0)) == want, masked
 

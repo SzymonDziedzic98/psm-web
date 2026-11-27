@@ -78,6 +78,10 @@ global {
 	float rear_factor <- 1.0;          // mnożnik promieni poza stożkiem (Yu i in. 2020: ok. 0,6)
 	int rear_zones <- 4;               // ile stref od intymnej istnieje za plecami: 4 = wszystkie, 2 = intymna i osobista
 	bool rear_masked <- true;          // za plecami też maskowanie przeszkodami
+	// Z4c: kierunek spojrzenia (tylko przy fov_deg < 360)
+	float turn_rate_dps <- 0.0;        // °/s, maks. szybkość obrotu spojrzenia; 0 = spojrzenie = kierunek ruchu
+	float scan_amp_deg <- 0.0;         // °, amplituda rozglądania się; 0 = brak
+	float scan_period_s <- 4.0;        // s, okres rozglądania się
 	// Z5: ciemność z lamp
 	bool dark_on <- false;
 	string lamps_file <- "";           // SHP z punktami lamp; puste = brak lamp (przy dark_on: pełna ciemność)
@@ -156,6 +160,10 @@ global {
 					}
 				}
 			}
+		}
+		// Z4c: losowa faza rozglądania się (losowanie tylko przy scan_amp_deg > 0)
+		if (scan_amp_deg > 0.0) {
+			ask phantom { scan_phase <- rnd(360.0); }
 		}
 		// Z5: lampy
 		if (lamps_file != "") {
@@ -283,6 +291,27 @@ species phantom skills: [moving] {
    geometry rear_social_geometry   update: (fov_deg < 360.0 and rear_zones >= 3) ? (rear_masked ? (circle(social * rear_factor, location) masked_by obstacle) : circle(social * rear_factor, location)) : nil;
    geometry rear_public_geometry   update: (fov_deg < 360.0 and rear_zones >= 4) ? (rear_masked ? (circle(public * rear_factor, location) masked_by obstacle) : circle(public * rear_factor, location)) : nil;
 
+   // Z4c: spojrzenie obraca się ku kierunkowi ruchu najwyżej o turn_rate_dps × krok, plus rozglądanie się
+   float gaze <- 0.0;
+   float look <- 0.0;
+   bool gaze_ready <- false;
+   float scan_phase <- 0.0;
+   reflex update_gaze when: fov_deg < 360.0 {
+      if (!gaze_ready or turn_rate_dps <= 0.0) {
+         gaze <- heading;
+         gaze_ready <- true;
+      } else {
+         float d <- heading - gaze;
+         d <- d - 360.0 * floor((d + 180.0) / 360.0);
+         float mx <- turn_rate_dps * step;
+         gaze <- gaze + max([0.0 - mx, min([mx, d])]);
+      }
+      look <- gaze;
+      if (scan_amp_deg > 0.0) {
+         look <- gaze + scan_amp_deg * sin(360.0 * time / scan_period_s + scan_phase);
+      }
+   }
+
    reflex update_psychophysiology {
       where_are_they <- bot collect distance_number(each.location);
 
@@ -328,7 +357,7 @@ species phantom skills: [moving] {
       }
       // Z4, Z4b: poza stożkiem widzenia (kąt od kierunku ruchu > fov_deg / 2) tylko strefy za plecami
       if (fov_deg < 360.0 and (location distance_to loc) > 0.0) {
-         float off <- (self towards loc) - heading;
+         float off <- (self towards loc) - look;
          off <- abs(off - 360.0 * floor((off + 180.0) / 360.0));
          if (off > fov_deg / 2.0) {
             if (rear_intimate_geometry != nil and rear_intimate_geometry covers loc) { return 4; }
@@ -445,6 +474,9 @@ experiment Hall  type: gui {
 	parameter "Mnożnik stref za plecami" var: rear_factor category: "Percepcja";
 	parameter "Strefy za plecami (od intymnej)" var: rear_zones category: "Percepcja";
 	parameter "Za plecami maskowanie przeszkodami" var: rear_masked category: "Percepcja";
+	parameter "Szybkość obrotu spojrzenia (°/s)" var: turn_rate_dps category: "Percepcja";
+	parameter "Rozglądanie się: amplituda (°)" var: scan_amp_deg category: "Percepcja";
+	parameter "Rozglądanie się: okres (s)" var: scan_period_s category: "Percepcja";
 	parameter "Ciemność (widać tylko w kręgu lamp)" var: dark_on category: "Ciemność i sezon";
 	parameter "Plik lamp (SHP, punkty)" var: lamps_file category: "Ciemność i sezon";
 	parameter "Promień kręgu lampy (m)" var: lamp_radius category: "Ciemność i sezon";

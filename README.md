@@ -137,6 +137,7 @@ z artykułu UFUG (bee3774) w Pythonie i w GAML. Te same parametry są w `src/psm
 | Z3b | `bot_older_share` (0), `bot_older_speed_factor` (0,85) | część botów to wolniejsi starsi piesi |
 | Z12 | `bot_run_share`, `bot_bike_share` (0), prędkości 10 i 16 km/h, `bike_paths_only` (false) | biegacze i rowerzyści; rowerzyści opcjonalnie tylko na `bicycle = yes/designated` |
 | Z4, Z4b | `fov_deg` (360), `rear_factor` (1), `rear_zones` (4), `rear_masked` (true) | stożek widzenia; poza nim tylko `rear_zones` stref od intymnej, promienie × `rear_factor` |
+| Z4c | `turn_rate_dps` (0), `scan_amp_deg` (0), `scan_period_s` (4 s) | spojrzenie obraca się stopniowo ku kierunkowi ruchu i opcjonalnie rozgląda; bez tego przy zawróceniu phantom widzi naraz wszystkich, których miał za plecami |
 | Z5 | `dark_on` (false), `lamp_radius` (10 m), `dark_detect_m` (5 m) | bot poza kręgiem lampy niewidoczny dalej niż `dark_detect_m`; lampy: `--lamps plik` albo warstwa `lamps` |
 | Z6 | `season` (summer), `bush_evergreen_share` (1) | zimą znikają przeszkody `leaf_cycle = deciduous`, a bez tej właściwości zostaje podany udział |
 
