@@ -125,6 +125,25 @@ DEFAULTS = {
     # Z4d: pamięć widzianych osób. Bot niewidoczny (poza stożkiem, za przeszkodą, w ciemności) przez memory_s sekund
     # od ostatniego zobaczenia zachowuje ostatnią strefę, więc stres daje tylko wzrost ponad nią. 0 = bez pamięci (jak dotąd).
     "memory_s": 0.0,
+    # Z14: przestrzenna ścieżka i siła społeczna 2D (wariant B). Odwzorowanie skilla pedestrian z GAMA 2025.6.4,
+    # model "advanced" (Helbing i Molnár 1995 z anizotropią), z tymi samymi wzorami i parametrami, plus twardy rdzeń:
+    # ruch, który zbliża ciało do innego na mniej niż szerokość barków, jest odrzucany (brak przenikania).
+    # False = ruch po osi ścieżki jak dotąd.
+    "path_space": False,
+    "path_width_m": 2.5,           # m, szerokość ścieżki bez właściwości width (wolna przestrzeń = bufor osi)
+    "shoulder_length": 0.45,       # m, szerokość barków (GAMA shoulder_length)
+    "minimal_distance": 0.25,      # m, GAMA minimal_distance
+    "sfm_A_ped": 0.16,             # GAMA A_pedestrians_SFM (przykład "advanced")
+    "sfm_B_ped": 0.1,              # GAMA B_pedestrians_SFM
+    "sfm_relax": 0.5,              # s, GAMA relaxion_SFM
+    "sfm_gamma": 0.35,             # GAMA gama_SFM (siła styczna przy ruchu naprzeciw)
+    "sfm_lambda": 0.1,             # GAMA lambda_SFM (anizotropia)
+    "sfm_k": 200.0,                # GAMA k_SFM (siła ciała)
+    "sfm_kappa": 400.0,            # GAMA kappa_SFM (tarcie)
+    "ped_consideration_m": 3.0,    # m, GAMA pedestrian_consideration_distance
+    "proba_detour": 0.5,           # GAMA proba_detour: szansa przyjęcia ruchu, który oddala od punktu trasy
+    "waypoint_tolerance": 1.0,     # m, GAMA tolerance_waypoint
+    "hard_core": True,             # brak przenikania (dodatek wobec GAMA, ten sam w GAML)
     # Z5: ciemność z lamp
     "dark_on": False,              # True: bot poza kręgiem lampy niewidoczny dalej niż dark_detect_m
     "lamp_radius": 10.0,           # m, promień kręgu światła lampy
@@ -213,6 +232,21 @@ GUI_PARAMETERS = [
         ("scan_period_s", "Rozglądanie się: okres (s)"),
         ("memory_s", "Pamięć widzianych osób (s; 0 = brak)"),
     ]),
+    ("Przestrzeń ścieżki (siła społeczna)", [
+        ("path_space", "Ruch 2D w obrysie ścieżek (siła społeczna)"),
+        ("path_width_m", "Szerokość ścieżki (m, bez width)"),
+        ("shoulder_length", "Szerokość barków (m)"),
+        ("minimal_distance", "Minimalny odstęp (m)"),
+        ("sfm_A_ped", "SFM: A (piesi)"),
+        ("sfm_B_ped", "SFM: B (piesi, m)"),
+        ("sfm_relax", "SFM: czas relaksacji (s)"),
+        ("sfm_gamma", "SFM: gamma (styczna)"),
+        ("sfm_lambda", "SFM: lambda (anizotropia)"),
+        ("ped_consideration_m", "Zasięg uwzględniania innych (m)"),
+        ("proba_detour", "Szansa objazdu"),
+        ("waypoint_tolerance", "Tolerancja punktu trasy (m)"),
+        ("hard_core", "Brak przenikania (twardy rdzeń)"),
+    ]),
     ("Ciemność i sezon", [
         ("dark_on", "Ciemność (widać tylko w kręgu lamp)"),
         ("lamp_radius", "Promień kręgu lampy (m)"),
@@ -240,7 +274,7 @@ RESTART_KEYS = {"bot_nb", "phantom_nb", "bot_speed_kmh", "bot_speed_sd", "phanto
                 "bush_form", "bush_band_width", "bush_band_length",
                 "bot_older_share", "bot_older_speed_factor", "bot_run_share", "bot_run_speed_kmh", "bot_run_speed_sd",
                 "bot_bike_share", "bot_bike_speed_kmh", "bot_bike_speed_sd", "bike_paths_only",
-                "fov_deg", "rear_factor", "rear_zones", "scan_amp_deg", "dark_on", "lamp_radius", "season", "bush_evergreen_share"}
+                "fov_deg", "rear_factor", "rear_zones", "scan_amp_deg", "dark_on", "path_space", "path_width_m", "lamp_radius", "season", "bush_evergreen_share"}
 
 
 def resolved_params(params=None):
@@ -441,6 +475,12 @@ def split_layers(features, props=None, extras=None):
             if extras is not None and (str(pr.get("bicycle", "")).lower() in ("yes", "designated")
                                        or pr.get("highway") == "cycleway"):
                 extras.setdefault("bike_lines", []).extend(parts)
+            if extras is not None and pr.get("width") not in (None, ""):
+                try:
+                    w = float(str(pr["width"]).replace(",", ".").replace("m", "").strip())
+                    extras.setdefault("width_lines", []).append((parts, w))
+                except ValueError:
+                    pass
         elif kind in ("obstacles", "polygon"):
             obstacles.append(parts)
             if extras is not None:
@@ -1714,7 +1754,8 @@ class Obstacles:
 # ---------------------------------------------------------------------------
 
 class Mover:
-    __slots__ = ("edge", "s", "loc", "heading", "speed", "target", "target_loc", "route", "route_ver", "kind", "odo")
+    __slots__ = ("edge", "s", "loc", "heading", "speed", "target", "target_loc", "route", "route_ver", "kind", "odo",
+                 "vel", "wps", "wpi", "road")
 
     def __init__(self, net, rng, speed):
         self.edge, self.s = net.random_location(rng)
@@ -1726,8 +1767,25 @@ class Mover:
         self.route_ver = -1
         self.kind = "walk"          # typ bota: walk / older / run / bike (Z3b, Z12)
         self.odo = 0.0              # przebyta droga (m)
+        self.vel = (0.0, 0.0)       # Z14: przesunięcie w ostatnim kroku (GAMA velocity)
+        self.wps = None             # Z14: punkty trasy [(punkt, krawędź)] (GAMA waypoints)
+        self.wpi = 0
+        self.road = None            # Z14: krawędź bieżącego punktu trasy (rejestracja jak agents_on w GAMA)
 
     def normal_move(self, model):
+        if model.sfm:
+            if self.wps is None:
+                if self.kind == "bike" and model.bike_edges:
+                    e = model.bike_edges[model.rng.randrange(len(model.bike_edges))]
+                    self.target = (e, model.rng.uniform(0.0, e.length))
+                else:
+                    self.target = model.net.random_location(model.rng)
+                self.target_loc = self.target[0].point_at(self.target[1])[0]
+                sfm_virtual_path(model, self)
+            elif isinstance(self, Phantom) and self.route_ver != model.graph_version:
+                sfm_virtual_path(model, self)   # phantom: nowa trasa po przeliczeniu wag strachu
+            sfm_walk(model, self)
+            return
         # if target distance_to location < 1: nowy cel, w przeciwnym razie goto po road_network
         if dist(self.target_loc, self.loc) < 1.0:
             if self.kind == "bike" and model.bike_edges:
@@ -1776,7 +1834,7 @@ class Mover:
 class Phantom(Mover):
     __slots__ = ("vigilance", "adrenaline", "cortisol", "total_adrenaline", "total_cortisol",
                  "total_vigilance", "where_are_they", "where_were_they", "fear_events", "fear", "weights",
-                 "gaze", "look", "scan_phase", "mem_level", "mem_cycle")
+                 "gaze", "look", "scan_phase", "mem_level", "mem_cycle", "jumps")
 
     def __init__(self, net, rng, speed, level):
         Mover.__init__(self, net, rng, speed)
@@ -1796,6 +1854,7 @@ class Phantom(Mover):
         self.scan_phase = 0.0
         self.mem_level = None   # Z4d: ostatnia widziana strefa każdego bota
         self.mem_cycle = None   # Z4d: cykl, w którym bot był ostatnio widziany
+        self.jumps = [0, 0, 0, 0, 0]   # liczba skoków strefy o 1, 2, 3, 4 (indeks = wielkość skoku)
 
     def route_weights(self, model):
         # phantom: wspólny graf albo własne wagi z własnej pamięci strachu (fear_scope = "individual")
@@ -1843,10 +1902,12 @@ class Phantom(Mover):
         if not self.where_were_they:
             return 0.0
         total = 0.0
+        jumps = self.jumps
         for was, now in zip(self.where_were_they, self.where_are_they):
             if was < now:
                 diff = now - was
                 total += diff * diff - 0.99
+                jumps[diff] += 1
         return total
 
     def update_gaze(self, model):
@@ -1921,6 +1982,243 @@ class Phantom(Mover):
 SUMMARY_HEADER = ["bot_nb", "phantom_nb", "total_adrenaline", "total_cortisol", "total_vigilance"]
 
 
+# ---------------------------------------------------------------------------
+# Z14: siła społeczna 2D (odwzorowanie skilla pedestrian z GAMA 2025.6.4, model "advanced")
+# ---------------------------------------------------------------------------
+
+def _gama_angle_deg(a, b):
+    """SpatialPunctal.angleInDegreesBetween({0,0}, a, b): kąt skierowany w stopniach, w przedziale 0–360."""
+    na, nb = math.hypot(a[0], a[1]), math.hypot(b[0], b[1])
+    if na == 0 or nb == 0:
+        return 0.0
+    c = round((a[0] * b[0] + a[1] * b[1]) / (na * nb), 10)
+    ang = math.degrees(math.acos(max(-1.0, min(1.0, c))))
+    r = ang if a[0] * b[1] - a[1] * b[0] > 0 else -ang
+    while r < 0:
+        r += 360
+    while r > 360:
+        r -= 360
+    return r
+
+
+def _norm(v):
+    n = math.hypot(v[0], v[1])
+    return (v[0] / n, v[1] / n) if n else (0.0, 0.0)
+
+
+def sfm_avoid(model, a, loc, target, neighbors):
+    """PedestrianSkill.avoidSFM: kierunek ruchu (wektor jednostkowy). Wzory i kolejność działań jak w GAMA,
+    łącznie z tym, że cos() dostaje kąt w stopniach, a wektor n_ij jest modyfikowany w miejscu (fnorm, fsoc)."""
+    p = model.p
+    cur = a.vel
+    sh = float(p["shoulder_length"])
+    shoulderL = sh / 2.0 + float(p["minimal_distance"])
+    dist0 = dist(loc, target)
+    dt = model.step_s
+    if dist0 == 0 or a.speed <= 0:
+        return (0.0, 0.0)
+    lam, gam, Ap, Bp = float(p["sfm_lambda"]), float(p["sfm_gamma"]), float(p["sfm_A_ped"]), float(p["sfm_B_ped"])
+    k, kappa = float(p["sfm_k"]), float(p["sfm_kappa"])
+    ei = _norm(cur)
+    f = dist0 / min(a.speed, dist0 / dt)
+    dv = ((target[0] - loc[0]) / f, (target[1] - loc[1]) / f)
+    relax = float(p["sfm_relax"])
+    fdest = ((dv[0] - cur[0]) / relax, (dv[1] - cur[1]) / relax)
+    if ei == (0.0, 0.0):
+        ei = fdest
+    fx = fy = 0.0
+    for o in neighbors:
+        d = dist(a.loc, o.loc)
+        if d <= 0:
+            continue
+        fact = Ap * math.exp((shoulderL + sh / 2.0 - d) / Bp)
+        nx, ny = (a.loc[0] - o.loc[0]) / d, (a.loc[1] - o.loc[1]) / d
+        phi = _gama_angle_deg(ei, (-nx, -ny))
+        w = fact * (lam + (1 - lam) * (1 + math.cos(phi)) / 2.0)   # jak w GAMA: cos kąta w stopniach
+        nx, ny = nx * w, ny * w                  # fnorm (ten sam obiekt co n_ij)
+        tx, ty = -ny, nx
+        ej = _norm(o.vel)
+        if ei[0] * ej[0] + ei[1] * ej[1] <= 0:
+            g = gam * math.hypot(nx, ny)
+            nx, ny = nx + tx * g, ny + ty * g    # fsoc = fnorm + ftang (n_ij też)
+        force = [nx, ny]
+        omega = shoulderL + sh / 2.0 - d
+        if omega > 0:
+            force[0] += nx * omega * k
+            force[1] += ny * omega * k
+            ds = (o.vel[0] - cur[0]) * tx + (o.vel[1] - cur[1]) * ty
+            force[0] += tx * omega * kappa * ds
+            force[1] += ty * omega * kappa * ds
+        fx += force[0]
+        fy += force[1]
+    return _norm((cur[0] + fdest[0] + fx, cur[1] + fdest[1] + fy))
+
+
+def _in_free_space(model, e, q):
+    a, b = e.pts[0], e.pts[-1]
+    return min(_point_seg_dist(q, e.pts[i], e.pts[i + 1]) for i in range(len(e.pts) - 1)) <= model.edge_half[e.id]
+
+
+def _closest_in_free_space(model, e, q):
+    best, bp = 9e18, q
+    for i in range(len(e.pts) - 1):
+        a, b = e.pts[i], e.pts[i + 1]
+        dx, dy = b[0] - a[0], b[1] - a[1]
+        L2 = dx * dx + dy * dy
+        t = 0.0 if L2 == 0 else max(0.0, min(1.0, ((q[0] - a[0]) * dx + (q[1] - a[1]) * dy) / L2))
+        c = (a[0] + t * dx, a[1] + t * dy)
+        d = dist(q, c)
+        if d < best:
+            best, bp = d, c
+    h = model.edge_half[e.id] * (1 - 1e-9)
+    if best <= h or best == 0:
+        return q
+    return (bp[0] + (q[0] - bp[0]) * h / best, bp[1] + (q[1] - bp[1]) * h / best)
+
+
+def _project_on_edge(e, q):
+    best, bs = 9e18, 0.0
+    for i in range(len(e.pts) - 1):
+        a, b = e.pts[i], e.pts[i + 1]
+        dx, dy = b[0] - a[0], b[1] - a[1]
+        L2 = dx * dx + dy * dy
+        t = 0.0 if L2 == 0 else max(0.0, min(1.0, ((q[0] - a[0]) * dx + (q[1] - a[1]) * dy) / L2))
+        d = dist(q, (a[0] + t * dx, a[1] + t * dy))
+        if d < best:
+            best, bs = d, e.cum[i] + t * math.sqrt(L2)
+    return bs
+
+
+def _sfm_register(model, a, e):
+    if a.road is not None:
+        model.on_edge[a.road.id].discard(a)
+    a.road = e
+    if e is not None:
+        model.on_edge[e.id].add(a)
+
+
+def sfm_virtual_path(model, a):
+    """PedestrianSkill.compute_virtual_path: punkty trasy = wierzchołki odcinków trasy (bez pierwszego każdego
+    odcinka) i punkt docelowy; trasa z bieżącego odcinka, po rzucie położenia na oś."""
+    a.s = _project_on_edge(a.edge, a.loc)
+    route = model.net.route((a.edge, a.s), a.target, a.route_weights(model))
+    a.route_ver = model.graph_version
+    if not route:
+        a.wps = None
+        return
+    wps = []
+    for e, s0, s1 in route:
+        if s1 >= s0:
+            inner = [e.pts[i] for i in range(1, len(e.pts) - 1) if s0 < e.cum[i] < s1]
+        else:
+            inner = [e.pts[i] for i in range(len(e.pts) - 2, 0, -1) if s1 < e.cum[i] < s0]
+        for q in inner:
+            wps.append((q, e))
+        wps.append((e.point_at(s1)[0], e))
+    a.wps, a.wpi = wps, 0
+    _sfm_register(model, a, wps[0][1])
+    if not _in_free_space(model, wps[0][1], a.loc):
+        q = _closest_in_free_space(model, wps[0][1], a.loc)
+        near = _sfm_neighbors(model, a, wps[0][1])
+        if not model.p["hard_core"] or _hard_block(a, a.loc, q, near, float(model.p["shoulder_length"])) is None:
+            a.loc = q
+
+
+def _sfm_neighbors(model, a, e):
+    out = []
+    for eid in model.linked[e.id]:
+        out.extend(model.on_edge[eid])
+    return out
+
+
+def _hard_block(a, loc, new, near, sh):
+    """Pierwszy sąsiad, do którego ruch loc -> new zbliża na mniej niż shoulder_length (twardy rdzeń), albo None."""
+    for o in near:
+        if o is not a:
+            dn = dist(new, o.loc)
+            if dn < sh and dn < dist(loc, o.loc):
+                return o
+    return None
+
+
+SIDESTEP_DEG = (30.0, 60.0, 90.0)
+
+
+def _sidestep(model, a, e, loc, new, blk, near, sh):
+    """Ruch zablokowany przez twardy rdzeń: ten sam krok obrócony o 30°, 60°, 90° najpierw w stronę przeciwną
+    do blokującego (przy sąsiedzie dokładnie na wprost: w prawo), potem w drugą. Pierwszy krok, który mieści się
+    w obrysie ścieżki i nie narusza rdzenia, wygrywa; brak takiego = stoi w miejscu (None)."""
+    vx, vy = new[0] - loc[0], new[1] - loc[1]
+    if vx == 0 and vy == 0:
+        return None
+    cr = vx * (blk.loc[1] - loc[1]) - vy * (blk.loc[0] - loc[0])   # > 0: blokujący po lewej
+    first = -1.0 if cr >= 0 else 1.0                                 # -1 = obrót w prawo (zgodnie z zegarem)
+    for sgn in (first, -first):
+        for deg in SIDESTEP_DEG:
+            t = math.radians(deg) * sgn
+            c, s_ = math.cos(t), math.sin(t)
+            q = (loc[0] + vx * c - vy * s_, loc[1] + vx * s_ + vy * c)
+            if _in_free_space(model, e, q) and _hard_block(a, loc, q, near, sh) is None:
+                return q
+    return None
+
+
+def sfm_walk(model, a):
+    """PedestrianSkill.walk + walkWithForceModel (avoid_other = true, bez przeszkód: ściany = obrys ścieżki).
+    Twardy rdzeń (hard_core): ruch, po którym ciało jest bliżej niż shoulder_length od innego i bliżej niż przed
+    ruchem, jest odrzucany."""
+    if not a.wps:
+        return
+    p = model.p
+    max_dist = a.speed * model.step_s
+    tol = float(p["waypoint_tolerance"])
+    pdet = float(p["proba_detour"])
+    sh = float(p["shoulder_length"])
+    percep = max(max_dist, float(p["ped_consideration_m"]))
+    while True:
+        target, e = a.wps[a.wpi]
+        prev = a.loc
+        loc = a.loc
+        dist0 = dist(loc, target)
+        if dist0 > 0:
+            near = [o for o in _sfm_neighbors(model, a, e) if dist(o.loc, loc) <= percep]
+            v = sfm_avoid(model, a, loc, target, near)
+            v = (v[0] * dist0, v[1] * dist0)
+            dT = math.hypot(v[0], v[1])
+            new = loc
+            if dT > 0:
+                c = min(max_dist / dT, 1.0)
+                new = (loc[0] + v[0] * c, loc[1] + v[1] * c)
+            if not _in_free_space(model, e, new):
+                new = _closest_in_free_space(model, e, new)
+            accept = model.walk_rng.random() >= 1.0 - pdet or dist(new, target) <= dist(loc, target)
+            if accept and p["hard_core"]:
+                blk = _hard_block(a, loc, new, near, sh)
+                if blk is not None:
+                    new = _sidestep(model, a, e, loc, new, blk, near, sh)
+                    accept = new is not None
+            if accept:
+                a.vel = (new[0] - loc[0], new[1] - loc[1])
+                a.odo += math.hypot(a.vel[0], a.vel[1])
+                if a.vel != (0.0, 0.0):
+                    a.heading = math.atan2(a.vel[1], a.vel[0])
+                a.loc = new
+            else:
+                a.vel = (0.0, 0.0)
+        a.edge = e
+        if dist(a.loc, target) <= tol:
+            if a.wpi < len(a.wps) - 1:
+                a.wpi += 1
+                _sfm_register(model, a, a.wps[a.wpi][1])
+                max_dist -= dist(a.loc, prev)
+                if max_dist > 0:
+                    continue
+            else:
+                _sfm_register(model, a, None)
+                a.wps = None
+        break
+
+
 class Model:
     def __init__(self, params=None, seed=None, roads=None, obstacles=None, boundary=None, extras=None):
         self.p = resolved_params(params)
@@ -1937,6 +2235,7 @@ class Model:
             self.source = "file"
         roads, obstacles, boundary, extras = self._normalize(roads, obstacles or [], boundary or [], extras)
         self.winter_removed = 0
+        self.sfm = False
         self.planting_info = {}
         if p["planting"] == "controlled":
             obstacles, self.planting_info = plant_bushes(roads, p)
@@ -1984,6 +2283,7 @@ class Model:
         self.phantoms = [Phantom(self.net, self.rng, float(p["phantom_speed_kmh"]) * kmh, float(p["initial_level"]))
                          for _ in range(int(p["phantom_nb"]))]
         self._assign_bot_types(extras.get("bike_lines") or [])
+        self._setup_space(extras.get("width_lines") or [])
         if float(p["scan_amp_deg"]) > 0:
             srng = random.Random(self.seed ^ 0x6A2E)
             for ph in self.phantoms:
@@ -2025,6 +2325,31 @@ class Model:
                         b.edge, b.s = e, prng.uniform(0.0, e.length)
                         b.loc, b.heading = e.point_at(b.s)
                         b.target, b.target_loc, b.route = (e, b.s), b.loc, None
+
+    def _setup_space(self, width_lines):
+        """Z14: połowa szerokości każdego odcinka (właściwość width, gdy środek odcinka leży ≤ 3 m od takiej linii;
+        inaczej path_width_m), sąsiedztwo odcinków (wspólny węzeł) i rejestr agentów na odcinkach."""
+        p = self.p
+        self.sfm = bool(p["path_space"])
+        if not self.sfm:
+            return
+        w0 = float(p["path_width_m"])
+        self.edge_half = [w0 / 2.0] * len(self.net.edges)
+        if width_lines:
+            idxs = [(SegIndex(parts, cell=10.0), w) for parts, w in width_lines]
+            for e in self.net.edges:
+                mid = e.point_at(e.length / 2)[0]
+                best = min(((ix.nearest(mid, limit=5.0), w) for ix, w in idxs), default=(9e9, w0))
+                if best[0] < BIKE_MATCH_M:
+                    self.edge_half[e.id] = best[1] / 2.0
+        self.linked = [sorted({o.id for o in self.net.adj[e.a] + self.net.adj[e.b]}) for e in self.net.edges]
+        self.on_edge = [set() for _ in self.net.edges]
+        self.walk_rng = random.Random(self.seed ^ 0x5F3)   # proba_detour, osobny generator
+        # start w losowym miejscu przekroju ścieżki (na osi wszyscy szliby gęsiego i zderzali się czołowo)
+        for a in self.bots + self.phantoms:
+            h = max(0.0, self.edge_half[a.edge.id] - float(p["shoulder_length"]) / 2.0)
+            off = self.walk_rng.uniform(-h, h)
+            a.loc = (a.loc[0] - math.sin(a.heading) * off, a.loc[1] + math.cos(a.heading) * off)
 
     def _winter(self, obstacles, leafs):
         """Z6: zimą znikają przeszkody leaf_cycle = deciduous; przeszkody bez leaf_cycle zostają z prawdopodobieństwem
@@ -2069,6 +2394,9 @@ class Model:
             ex["lamps"] = [(x - x0, y - y0) for x, y in ex["lamps"]]
         if ex.get("bike_lines"):
             ex["bike_lines"] = [[(x - x0, y - y0) for x, y in part] for part in ex["bike_lines"]]
+        if ex.get("width_lines"):
+            ex["width_lines"] = [([[(x - x0, y - y0) for x, y in part] for part in parts], w)
+                                 for parts, w in ex["width_lines"]]
         return feats[0][1], [f[1] for f in feats[1:-1]], feats[-1][1], ex
 
     # --- reflexy globalne ---
@@ -2217,6 +2545,9 @@ class Model:
             "bots_bike": sum(1 for b in self.bots if b.kind == "bike"),
             "n_lamps": len(self.lamp_points),
             "winter_removed": self.winter_removed,
+            # rozkład wielkości skoków strefy (artefakt drabiny stref: same skoki o 2+ przy zmienionych strefach)
+            "jumps_1": ph.jumps[1] if ph else 0, "jumps_2": ph.jumps[2] if ph else 0,
+            "jumps_3": ph.jumps[3] if ph else 0, "jumps_4": ph.jumps[4] if ph else 0,
         }
 
     # --- dane do przeglądarki ---
@@ -2415,7 +2746,7 @@ SENS_PARAMS = {
     "bot_nb": (40, 120),
 }
 # dodatkowe kolumny (--per-km), poza OUTPUTS, żeby domyślne pliki wyników miały te same kolumny co dotąd
-PER_KM_OUTPUTS = ["phantom_km", "adrenaline_per_km", "fear_events_per_km"]
+PER_KM_OUTPUTS = ["phantom_km", "adrenaline_per_km", "fear_events_per_km", "jumps_1", "jumps_2", "jumps_3", "jumps_4"]
 RATE_PARAMS = {"adrenaline_cooldown", "cortisol_cooldown", "fear_decay"}
 
 
@@ -3415,6 +3746,71 @@ def test_per_km_metrics():
     rows = run_plan(batch_plan({"phantom_speed_kmh": [3.4]}, 1, 1), cycles=100, per_km=True)
     assert "adrenaline_per_km" in rows[0]
     assert "adrenaline_per_km" not in run_plan(batch_plan({"bot_nb": [10]}, 1, 1), cycles=50)[0]
+
+
+def _line_model(params, n_bots=1):
+    """Prosta ścieżka 100 m wzdłuż osi x: phantom i boty ustawiane ręcznie."""
+    pp = {"bot_nb": n_bots, "phantom_nb": 1, "path_space": True, "path_width_m": 2.5}
+    pp.update(params)
+    return Model(pp, seed=3, roads=[[(0.0, 0.0), (50.0, 0.0), (100.0, 0.0)]], obstacles=[], boundary=[])
+
+
+def _send(m, a, x, y, goal_s):
+    e = m.net.edges[0] if m.net.edges[0].length >= 99 else max(m.net.edges, key=lambda f: f.length)
+    a.loc, a.edge, a.vel, a.wps = (x, y), e, (0.0, 0.0), None
+    a.target = (e, goal_s)
+    a.target_loc = e.point_at(goal_s)[0]
+    sfm_virtual_path(m, a)
+
+
+def test_sfm_head_on_pass_without_overlap():
+    m = _line_model({})
+    ph, b = m.phantoms[0], m.bots[0]
+    _send(m, ph, 10.0, 0.0, 95.0)       # oba dokładnie na osi, czołowo
+    _send(m, b, 90.0, 0.0, 5.0)
+    m.rebuild_graph()
+    ph.route_ver = b.route_ver = m.graph_version
+    mind = 9e9
+    for _ in range(400):
+        for a in (b, ph):
+            if a.wps is not None:
+                sfm_walk(m, a)
+        mind = min(mind, dist(ph.loc, b.loc))
+        for a in (b, ph):
+            assert abs(a.loc[1]) <= m.edge_half[a.edge.id] + 1e-6, a.loc
+    assert ph.loc[0] > 80 and b.loc[0] < 20, (ph.loc, b.loc)   # minęli się
+    assert mind >= m.p["shoulder_length"] - 1e-9, mind          # bez przenikania
+
+
+def test_sfm_run_stays_in_path_and_hard_core():
+    m = Model({"path_space": True, "bot_nb": 40, "end_cycle": 600}, seed=2)
+    sh = m.p["shoulder_length"]
+    for c in range(600):
+        m.step()
+        if c % 25 == 0:
+            ag = m.bots + m.phantoms
+            for a in ag:
+                e = a.road or a.edge
+                ex = min(min(_point_seg_dist(a.loc, f.pts[k], f.pts[k + 1]) for k in range(len(f.pts) - 1))
+                         - m.edge_half[f.id] for f in (m.net.edges[i] for i in m.linked[e.id]))
+                assert ex <= 1e-6, ex
+            dmin = min(dist(ag[i].loc, ag[j].loc) for i in range(len(ag)) for j in range(i + 1, len(ag)))
+            assert dmin >= sh - 0.05, dmin
+    mt = m.metrics()
+    assert mt["phantom_km"] > 0.15 and sum(mt["jumps_%d" % i] for i in range(1, 5)) > 0
+
+
+def test_sfm_width_property_per_edge():
+    fc = {"type": "FeatureCollection", "features": [
+        {"type": "Feature", "properties": {"highway": "footway", "width": "4"},
+         "geometry": {"type": "LineString", "coordinates": [[10, 10], [110, 10]]}},
+        {"type": "Feature", "properties": {"highway": "footway"},
+         "geometry": {"type": "LineString", "coordinates": [[110, 10], [110, 90]]}}]}
+    inp = load_inputs(json.dumps(fc), None, "p.geojson", simplify=False)
+    r, o, b = inp
+    m = Model({"path_space": True, "bot_nb": 0}, seed=1, roads=r, obstacles=o, boundary=b, extras=inp.extras)
+    halves = sorted(m.edge_half)
+    assert abs(halves[0] - 1.25) < 1e-9 and abs(halves[-1] - 2.0) < 1e-9, halves
 
 
 TESTS = [(name, fn) for name, fn in sorted(globals().items()) if name.startswith("test_") and callable(fn)]
